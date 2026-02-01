@@ -105,20 +105,31 @@ def enumerate_accounts(delay: float, max_delay: float, limit_blocks: int, output
         blocks = [b for b in blocks if b not in existing_blocks]
         err(f"  {len(blocks)} blocks remaining")
 
-    with HLSClient(min_delay=delay, max_delay=max_delay) as client:
-        for i, block in enumerate(blocks):
-            accounts = list(client.search_by_block(block))
-            all_accounts.extend(accounts)
+    def save_progress(msg: str = ""):
+        if all_accounts:
+            df = pd.DataFrame(all_accounts)
+            df.to_parquet(output_path)
+            err(f"{msg}Saved {len(all_accounts)} accounts to {output}")
 
-            # Save progress every 50 blocks
-            if (i + 1) % 50 == 0:
-                df = pd.DataFrame(all_accounts)
-                df.to_parquet(output_path)
-                err(f"  Checkpoint: {i + 1}/{len(blocks)} blocks, {len(all_accounts)} accounts (saved)")
+    try:
+        with HLSClient(min_delay=delay, max_delay=max_delay) as client:
+            for i, block in enumerate(blocks):
+                accounts = list(client.search_by_block(block))
+                all_accounts.extend(accounts)
 
-    df = pd.DataFrame(all_accounts)
-    df.to_parquet(output_path)
-    err(f"\nDone: {len(df)} accounts to {output}")
+                # Checkpoint every 50 blocks
+                if (i + 1) % 50 == 0:
+                    save_progress(f"Checkpoint ({i + 1}/{len(blocks)} blocks): ")
+    except KeyboardInterrupt:
+        err("\nInterrupted.")
+        save_progress("Saving progress: ")
+        sys.exit(130)
+    except Exception as e:
+        err(f"\nError: {e}")
+        save_progress("Saving progress before exit: ")
+        raise
+    else:
+        save_progress("\nDone: ")
 
 
 @main.command()
