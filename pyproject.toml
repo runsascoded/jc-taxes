@@ -13,6 +13,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "tenacity>=8.0",
     "utz>=0.20",
+    "shapely>=2.1.2",
 ]
 
 [project.optional-dependencies]

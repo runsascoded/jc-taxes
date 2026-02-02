@@ -248,5 +248,14 @@ def export(input_dir: str, output: str):
     err(f"\nWrote {len(df)} accounts to {output}")
 
 
+@main.command()
+@click.option("-o", "--output", default="www/public/parcels.geojson", help="Output GeoJSON file")
+@click.option("-l", "--limit", default=0, help="Limit features (0=all)")
+def geojson(output: str, limit: int):
+    """Generate GeoJSON for web visualization."""
+    from .geojson import generate_geojson
+    generate_geojson(Path(output), limit)
+
+
 if __name__ == "__main__":
     main()
