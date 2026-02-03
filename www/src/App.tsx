@@ -5,6 +5,14 @@ import { GeoJsonLayer } from '@deck.gl/layers'
 import type { Feature, Polygon, MultiPolygon } from 'geojson'
 import { useUrlState, intParam, stringParam } from 'use-prms'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import GradientEditor, {
+  type ColorStop,
+  type ScaleType,
+  interpolateColor,
+  encodeStops,
+  decodeStops,
+  DEFAULT_STOPS,
+} from './GradientEditor'
 
 const DEFAULT_VIEW = {
   latitude: 40.7178,
@@ -14,42 +22,21 @@ const DEFAULT_VIEW = {
 }
 
 const AVAILABLE_YEARS = [2023, 2024, 2025]
-const COLOR_MODES = ['gradient', 'mono'] as const
-type ColorMode = typeof COLOR_MODES[number]
 const AGGREGATE_MODES = ['lot', 'unit'] as const
 type AggregateMode = typeof AGGREGATE_MODES[number]
 
-// Mono color (blue-ish)
-const MONO_COLOR: [number, number, number, number] = [100, 150, 200, 180]
 const HIGHLIGHT_COLOR: [number, number, number, number] = [255, 255, 100, 220]
 
-// Color scale for $/sqft - red → orange → yellow → green
-function getGradientColor(perSqft: number, max: number): [number, number, number, number] {
-  const t = Math.min(perSqft / max, 1)  // 0 to 1
+// Custom param for color stops
+const stopsParam = (defaultVal: ColorStop[]) => ({
+  decode: (s: string | null) => (s ? decodeStops(s) : null) ?? defaultVal,
+  encode: (v: ColorStop[]) => encodeStops(v),
+})
 
-  // Use a multi-stop gradient: red(0) → orange(0.25) → yellow(0.5) → green(1)
-  let r: number, g: number, b: number
-  if (t < 0.33) {
-    // Red to orange
-    const s = t / 0.33
-    r = 255
-    g = Math.floor(100 * s)
-    b = 0
-  } else if (t < 0.66) {
-    // Orange to yellow
-    const s = (t - 0.33) / 0.33
-    r = 255
-    g = Math.floor(100 + 155 * s)
-    b = 0
-  } else {
-    // Yellow to green
-    const s = (t - 0.66) / 0.34
-    r = Math.floor(255 * (1 - s))
-    g = Math.floor(255 - 55 * s)
-    b = 0
-  }
-  return [r, g, b, 180]
-}
+const scaleParam = (defaultVal: ScaleType) => ({
+  decode: (s: string | null) => (s as ScaleType) ?? defaultVal,
+  encode: (v: ScaleType) => v,
+})
 
 // Height scale for 3D extrusion ($/sqft)
 function getElevation(perSqft: number, max: number): number {
@@ -81,8 +68,9 @@ export default function App() {
   // URL-persisted state
   const [year, setYear] = useUrlState('y', intParam(2024))
   const [maxPerSqft, setMaxPerSqft] = useUrlState('max', intParam(20))
-  const [colorMode, setColorMode] = useUrlState('color', stringParam('gradient'))
   const [aggregateMode, setAggregateMode] = useUrlState('agg', stringParam('lot'))
+  const [colorStops, setColorStops] = useUrlState('stops', stopsParam(DEFAULT_STOPS))
+  const [colorScale, setColorScale] = useUrlState('scale', scaleParam('linear'))
 
   // Track view state locally (not in URL to avoid re-renders)
   const [viewState, setViewState] = useState({
@@ -114,9 +102,9 @@ export default function App() {
     const id = getFeatureId(f)
     if (id === hoveredId) return HIGHLIGHT_COLOR
 
-    if (colorMode === 'mono') return MONO_COLOR
-    return getGradientColor(f.properties?.paid_per_sqft ?? 0, maxPerSqft)
-  }, [colorMode, maxPerSqft, hoveredId, getFeatureId])
+    const perSqft = f.properties?.paid_per_sqft ?? 0
+    return interpolateColor(perSqft, colorStops, maxPerSqft, colorScale)
+  }, [colorStops, colorScale, maxPerSqft, hoveredId, getFeatureId])
 
   const layers = [
     new GeoJsonLayer<ParcelFeature>({
@@ -140,7 +128,7 @@ export default function App() {
         }
       },
       updateTriggers: {
-        getFillColor: [year, maxPerSqft, colorMode, hoveredId, aggregateMode],
+        getFillColor: [year, maxPerSqft, colorStops, colorScale, hoveredId, aggregateMode],
         getElevation: [year, maxPerSqft, aggregateMode],
       },
     }),
@@ -184,6 +172,7 @@ export default function App() {
           display: 'flex',
           flexDirection: 'column',
           gap: 10,
+          minWidth: 240,
         }}
       >
         <label>
@@ -207,17 +196,16 @@ export default function App() {
             style={{ ...inputStyle, width: 70 }}
           />
         </label>
-        <label>
-          Color:{' '}
-          <select
-            value={colorMode}
-            onChange={(e) => setColorMode(e.target.value as ColorMode)}
-            style={inputStyle}
-          >
-            <option value="gradient">Gradient (red→green)</option>
-            <option value="mono">Mono (blue)</option>
-          </select>
-        </label>
+        <div style={{ borderTop: '1px solid #444', paddingTop: 8, marginTop: 4 }}>
+          <div style={{ marginBottom: 6, fontSize: 12, color: '#aaa' }}>Color Gradient</div>
+          <GradientEditor
+            stops={colorStops}
+            setStops={setColorStops}
+            scale={colorScale}
+            setScale={setColorScale}
+            max={maxPerSqft}
+          />
+        </div>
         <label>
           View:{' '}
           <select
