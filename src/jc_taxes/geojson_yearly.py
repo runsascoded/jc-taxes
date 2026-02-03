@@ -10,10 +10,11 @@ import shapely.ops
 from pyproj import Transformer
 from utz import err
 
-from .paths import DATA, PARCELS
+from .paths import DATA, PARCELS, PARCELS_COMBINED
 
-# Transform from WGS84 (lat/lon) to NJ State Plane (feet) for accurate area calculation
-transformer = Transformer.from_crs("EPSG:4326", "EPSG:3424", always_xy=True)
+# Transformers for different CRS scenarios
+wgs84_to_njsp = Transformer.from_crs("EPSG:4326", "EPSG:3424", always_xy=True)
+njsp_to_wgs84 = Transformer.from_crs("EPSG:3424", "EPSG:4326", always_xy=True)
 
 
 def generate_yearly_geojson(
@@ -43,9 +44,10 @@ def generate_yearly_geojson(
         err("Run: python -m jc_taxes.payments")
         return {}
 
-    # Load data
-    err(f"Loading parcels from {PARCELS}")
-    parcels = pd.read_parquet(PARCELS)
+    # Load data - prefer combined parcels if available
+    parcels_path = PARCELS_COMBINED if PARCELS_COMBINED.exists() else PARCELS
+    err(f"Loading parcels from {parcels_path}")
+    parcels = pd.read_parquet(parcels_path)
 
     err(f"Loading payments for year {year}")
     payments = pd.read_parquet(payments_path)
@@ -80,26 +82,64 @@ def generate_yearly_geojson(
     def clean_val(v):
         return None if pd.isna(v) else v
 
+    def is_njsp(geom) -> bool:
+        """Check if geometry is in NJ State Plane (large coordinate values)."""
+        bounds = geom.bounds  # (minx, miny, maxx, maxy)
+        # NJSP coordinates are typically 400k-700k for x, 0-900k for y
+        # WGS84 for NJ is around -75 to -74 for x, 39-41 for y
+        return bounds[0] > 1000  # Simple heuristic: x > 1000 means projected
+
+    def get_geometry(row):
+        """Extract geometry from row, handling both old and new parcel formats."""
+        geom = None
+        # Try 'geometry' column first (combined parcels from geopandas)
+        g = row.get("geometry")
+        if g is not None and not pd.isna(g):
+            if isinstance(g, bytes):
+                geom = shapely.wkb.loads(g)
+            elif hasattr(g, 'geom_type'):  # Already a shapely object
+                geom = g
+        # Fall back to 'geo_shape' (old JC parcels format)
+        if geom is None:
+            geo_shape = row.get("geo_shape")
+            if geo_shape is not None and not pd.isna(geo_shape):
+                if isinstance(geo_shape, bytes):
+                    geom = shapely.wkb.loads(geo_shape)
+                elif isinstance(geo_shape, str):
+                    geom = shapely.geometry.shape(json.loads(geo_shape))
+        return geom
+
+    def process_geometry(geom):
+        """Convert geometry to WGS84 for GeoJSON and calculate area in sqft."""
+        if geom is None:
+            return None, None, 0.0
+
+        if is_njsp(geom):
+            # Already in NJ State Plane (feet) - area is direct, need to convert to WGS84 for GeoJSON
+            area_sqft = geom.area
+            geom_wgs84 = shapely.ops.transform(njsp_to_wgs84.transform, geom)
+            geojson = json.loads(shapely.to_geojson(geom_wgs84))
+        else:
+            # In WGS84 - need to project to NJ State Plane for area
+            projected = shapely.ops.transform(wgs84_to_njsp.transform, geom)
+            area_sqft = projected.area
+            geojson = json.loads(shapely.to_geojson(geom))
+
+        return geojson, geom, area_sqft
+
     features = []
 
     if aggregate == "unit":
         # Unit-level: one feature per parcel row with individual payments
         err("Generating unit-level features...")
         for _, row in parcels.iterrows():
-            geo_shape = row.get("geo_shape")
-            if pd.isna(geo_shape):
+            geom = get_geometry(row)
+            if geom is None:
                 continue
-
             try:
-                if isinstance(geo_shape, bytes):
-                    geom = shapely.wkb.loads(geo_shape)
-                elif isinstance(geo_shape, str):
-                    geom = shapely.geometry.shape(json.loads(geo_shape))
-                else:
+                geometry, _, area_sqft = process_geometry(geom)
+                if geometry is None:
                     continue
-                geometry = json.loads(shapely.to_geojson(geom))
-                projected = shapely.ops.transform(transformer.transform, geom)
-                area_sqft = projected.area
             except Exception:
                 continue
 
@@ -129,18 +169,8 @@ def generate_yearly_geojson(
         lot_props = {}   # join_key -> {hadd, hnum}
 
         for _, row in parcels.iterrows():
-            geo_shape = row.get("geo_shape")
-            if pd.isna(geo_shape):
-                continue
-
-            try:
-                if isinstance(geo_shape, bytes):
-                    geom = shapely.wkb.loads(geo_shape)
-                elif isinstance(geo_shape, str):
-                    geom = shapely.geometry.shape(json.loads(geo_shape))
-                else:
-                    continue
-            except Exception:
+            geom = get_geometry(row)
+            if geom is None:
                 continue
 
             key = row["join_key"]
@@ -161,9 +191,9 @@ def generate_yearly_geojson(
                     dissolved = geoms[0]
                 else:
                     dissolved = shapely.ops.unary_union(geoms)
-                geometry = json.loads(shapely.to_geojson(dissolved))
-                projected = shapely.ops.transform(transformer.transform, dissolved)
-                area_sqft = projected.area
+                geometry, _, area_sqft = process_geometry(dissolved)
+                if geometry is None:
+                    continue
             except Exception:
                 continue
 
