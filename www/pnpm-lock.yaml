@@ -41,6 +41,9 @@ importers:
       react-map-gl:
         specifier: ^8.1.0
         version: 8.1.0(maplibre-gl@5.17.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      use-kbd:
+        specifier: github:runsascoded/use-kbd#caa1afd04827fe79ff3f313cd7e01b2c08372f78
+        version: https://codeload.github.com/runsascoded/use-kbd/tar.gz/caa1afd04827fe79ff3f313cd7e01b2c08372f78(react@19.2.4)
       use-prms:
         specifier: ^0.4.0
         version: 0.4.0(react@19.2.4)
@@ -2407,6 +2410,12 @@ packages:
 
   uri-js@4.4.1:
     resolution: {integrity: sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg==}
+
+  use-kbd@https://codeload.github.com/runsascoded/use-kbd/tar.gz/caa1afd04827fe79ff3f313cd7e01b2c08372f78:
+    resolution: {tarball: https://codeload.github.com/runsascoded/use-kbd/tar.gz/caa1afd04827fe79ff3f313cd7e01b2c08372f78}
+    version: 0.8.0-dist.1f011ad
+    peerDependencies:
+      react: '>=18.0.0'
 
   use-prms@0.4.0:
     resolution: {integrity: sha512-rVcgaXJxwWNfa7ojdrkaGi+OmHtA7gvXjDoBoVT7k8HTD2av7oQ2Ii9nu6kKfDR6nwm4+tdlQ0+VEc/obildgQ==}
@@ -5161,6 +5170,10 @@ snapshots:
   uri-js@4.4.1:
     dependencies:
       punycode: 2.3.1
+
+  use-kbd@https://codeload.github.com/runsascoded/use-kbd/tar.gz/caa1afd04827fe79ff3f313cd7e01b2c08372f78(react@19.2.4):
+    dependencies:
+      react: 19.2.4
 
   use-prms@0.4.0(react@19.2.4):
     optionalDependencies:

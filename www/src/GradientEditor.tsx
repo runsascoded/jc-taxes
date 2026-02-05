@@ -328,6 +328,6 @@ export function decodeStops(str: string): ColorStop[] | null {
 
 export const DEFAULT_STOPS: ColorStop[] = [
   { value: 0, color: [96, 96, 96] },      // grey
-  { value: 5, color: [255, 0, 0] },       // red
-  { value: 15, color: [0, 255, 0] },      // green
+  { value: 3.8, color: [255, 0, 0] },     // red
+  { value: 22.4, color: [0, 255, 0] },    // green
 ]

@@ -9,3 +9,15 @@ html, body, #root {
   height: 100%;
   overflow: hidden;
 }
+
+/* use-kbd dark theme overrides */
+:root {
+  --kbd-bg: #1a1a1a;
+  --kbd-bg-secondary: #2d2d2d;
+  --kbd-text: #e0e0e0;
+  --kbd-text-secondary: #b0b0b0;
+  --kbd-border: #404040;
+  --kbd-kbd-bg: #333;
+  --kbd-kbd-border: #555;
+  --kbd-kbd-text: #e0e0e0;
+}

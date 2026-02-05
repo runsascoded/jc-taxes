@@ -5,6 +5,8 @@ import { GeoJsonLayer } from '@deck.gl/layers'
 import type { Feature, Polygon, MultiPolygon } from 'geojson'
 import { useUrlState, intParam, stringParam } from 'use-prms'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import { useKeyboardShortcuts } from './useKeyboardShortcuts'
+import { useParcelSearch } from './useParcelSearch'
 import GradientEditor, {
   type ColorStop,
   type ScaleType,
@@ -21,8 +23,8 @@ const DEFAULT_VIEW = {
   bearing: 0,
 }
 
-const AVAILABLE_YEARS = [2023, 2024, 2025]
-const AGGREGATE_MODES = ['lot', 'unit'] as const
+const AVAILABLE_YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
+const AGGREGATE_MODES = ['lot', 'unit', 'block'] as const
 type AggregateMode = typeof AGGREGATE_MODES[number]
 
 const HIGHLIGHT_COLOR: [number, number, number, number] = [255, 255, 100, 220]
@@ -39,17 +41,17 @@ const scaleParam = (defaultVal: ScaleType) => ({
 })
 
 // Height scale for 3D extrusion ($/sqft)
-function getElevation(perSqft: number, max: number): number {
+function getElevation(perSqft: number, max: number, scale: number): number {
   const capped = Math.min(perSqft, max)
-  return capped * 15  // Scaled for reasonable heights
+  return capped * scale
 }
 
 type ParcelProperties = {
   block?: string
   lot?: string
   qual?: string
-  hadd?: string
-  hnum?: string
+  addr?: string
+  streets?: string
   year?: number
   paid?: number
   billed?: number
@@ -64,13 +66,15 @@ export default function App() {
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [hovered, setHovered] = useState<ParcelProperties | null>(null)
   const [loading, setLoading] = useState(true)
+  const [settingsOpen, setSettingsOpen] = useState(true)
 
   // URL-persisted state
-  const [year, setYear] = useUrlState('y', intParam(2024))
-  const [maxPerSqft, setMaxPerSqft] = useUrlState('max', intParam(20))
-  const [aggregateMode, setAggregateMode] = useUrlState('agg', stringParam('lot'))
+  const [year, setYear] = useUrlState('y', intParam(2025))
+  const [maxPerSqft, setMaxPerSqft] = useUrlState('max', intParam(300))
+  const [heightScale, setHeightScale] = useUrlState('hs', intParam(15))
+  const [aggregateMode, setAggregateMode] = useUrlState('agg', stringParam('block'))
   const [colorStops, setColorStops] = useUrlState('stops', stopsParam(DEFAULT_STOPS))
-  const [colorScale, setColorScale] = useUrlState('scale', scaleParam('linear'))
+  const [colorScale, setColorScale] = useUrlState('scale', scaleParam('log'))
 
   // Track view state locally (not in URL to avoid re-renders)
   const [viewState, setViewState] = useState({
@@ -78,9 +82,43 @@ export default function App() {
     pitch: 45,
   })
 
+  // Keyboard shortcuts
+  useKeyboardShortcuts({
+    year, setYear,
+    aggregateMode, setAggregateMode,
+    settingsOpen, setSettingsOpen,
+  })
+
+  // Omnibar search over parcels
+  const onParcelSelect = useCallback((f: ParcelFeature) => {
+    const p = f.properties
+    setHoveredId(`${p?.block || ''}-${p?.lot || ''}-${p?.qual || ''}`)
+    setHovered(p ?? null)
+    // Pan to the selected parcel
+    if (f.geometry) {
+      const coords = f.geometry.type === 'Polygon' ? f.geometry.coordinates[0] : f.geometry.coordinates[0][0]
+      const lngs = coords.map(c => c[0])
+      const lats = coords.map(c => c[1])
+      const centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2
+      const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2
+      setViewState(v => ({ ...v, longitude: centerLng, latitude: centerLat, zoom: Math.max(v.zoom, 15) }))
+    }
+  }, [])
+  useParcelSearch({ data, onSelect: onParcelSelect })
+
+  // Listen for pitch changes from keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const pitch = (e as CustomEvent).detail
+      setViewState(v => ({ ...v, pitch }))
+    }
+    window.addEventListener('set-pitch', handler)
+    return () => window.removeEventListener('set-pitch', handler)
+  }, [])
+
   useEffect(() => {
     setLoading(true)
-    const suffix = aggregateMode === 'unit' ? '-units' : ''
+    const suffix = aggregateMode === 'unit' ? '-units' : aggregateMode === 'block' ? '-blocks' : ''
     fetch(`/taxes-${year}${suffix}.geojson`)
       .then((r) => r.json())
       .then((geojson) => {
@@ -95,7 +133,7 @@ export default function App() {
 
   const getFeatureId = useCallback((f: ParcelFeature) => {
     const p = f.properties
-    return `${p?.block}-${p?.lot}-${p?.qual || ''}`
+    return `${p?.block || ''}-${p?.lot || ''}-${p?.qual || ''}`
   }, [])
 
   const getFillColor = useCallback((f: ParcelFeature): [number, number, number, number] => {
@@ -114,7 +152,7 @@ export default function App() {
       extruded: true,
       wireframe: true,
       getFillColor,
-      getElevation: (f) => getElevation(f.properties?.paid_per_sqft ?? 0, maxPerSqft),
+      getElevation: (f) => getElevation(f.properties?.paid_per_sqft ?? 0, maxPerSqft, heightScale),
       getLineColor: [100, 100, 100, 100],
       lineWidthMinPixels: 1,
       pickable: true,
@@ -129,7 +167,7 @@ export default function App() {
       },
       updateTriggers: {
         getFillColor: [year, maxPerSqft, colorStops, colorScale, hoveredId, aggregateMode],
-        getElevation: [year, maxPerSqft, aggregateMode],
+        getElevation: [year, maxPerSqft, heightScale, aggregateMode],
       },
     }),
   ]
@@ -166,68 +204,95 @@ export default function App() {
           right: 10,
           background: 'rgba(0,0,0,0.8)',
           color: 'white',
-          padding: '10px 15px',
           borderRadius: 4,
           fontSize: 14,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 10,
-          minWidth: 240,
+          minWidth: settingsOpen ? 240 : undefined,
+          maxWidth: '90vw',
         }}
       >
-        <label>
-          Tax Year:{' '}
-          <select
-            value={year}
-            onChange={(e) => setYear(Number(e.target.value))}
-            style={inputStyle}
-          >
-            {AVAILABLE_YEARS.map((y) => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Max $/sqft:{' '}
-          <input
-            type="number"
-            value={maxPerSqft}
-            onChange={(e) => setMaxPerSqft(Number(e.target.value) || 100)}
-            style={{ ...inputStyle, width: 70 }}
-          />
-        </label>
-        <div style={{ borderTop: '1px solid #444', paddingTop: 8, marginTop: 4 }}>
-          <div style={{ marginBottom: 6, fontSize: 12, color: '#aaa' }}>Color Gradient</div>
-          <GradientEditor
-            stops={colorStops}
-            setStops={setColorStops}
-            scale={colorScale}
-            setScale={setColorScale}
-            max={maxPerSqft}
-          />
+        <div
+          onClick={() => setSettingsOpen(v => !v)}
+          style={{
+            padding: '8px 15px',
+            cursor: 'pointer',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            userSelect: 'none',
+          }}
+        >
+          <span style={{ fontWeight: 'bold' }}>Settings</span>
+          <span style={{ fontSize: 10 }}>{settingsOpen ? '\u25B2' : '\u25BC'}</span>
         </div>
-        <label>
-          View:{' '}
-          <select
-            value={aggregateMode}
-            onChange={(e) => setAggregateMode(e.target.value as AggregateMode)}
-            style={inputStyle}
-          >
-            <option value="lot">Lots (dissolved)</option>
-            <option value="unit">Units (individual)</option>
-          </select>
-        </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          Pitch: {Math.round(viewState.pitch)}°
-          <input
-            type="range"
-            min={0}
-            max={85}
-            value={viewState.pitch}
-            onChange={(e) => setViewState(v => ({ ...v, pitch: Number(e.target.value) }))}
-            style={{ width: 80 }}
-          />
-        </label>
+        {settingsOpen && (
+          <div style={{ padding: '0 15px 10px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <label>
+              Tax Year:{' '}
+              <select
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
+                style={inputStyle}
+              >
+                {AVAILABLE_YEARS.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Max $/sqft:{' '}
+              <input
+                type="number"
+                value={maxPerSqft}
+                onChange={(e) => setMaxPerSqft(Number(e.target.value) || 100)}
+                style={{ ...inputStyle, width: 70 }}
+              />
+            </label>
+            <div style={{ borderTop: '1px solid #444', paddingTop: 8, marginTop: 4 }}>
+              <div style={{ marginBottom: 6, fontSize: 12, color: '#aaa' }}>Color Gradient</div>
+              <GradientEditor
+                stops={colorStops}
+                setStops={setColorStops}
+                scale={colorScale}
+                setScale={setColorScale}
+                max={maxPerSqft}
+              />
+            </div>
+            <label>
+              View:{' '}
+              <select
+                value={aggregateMode}
+                onChange={(e) => setAggregateMode(e.target.value as AggregateMode)}
+                style={inputStyle}
+              >
+                <option value="block">Blocks</option>
+                <option value="lot">Lots (dissolved)</option>
+                <option value="unit">Units (individual)</option>
+              </select>
+            </label>
+            <label>
+              Height scale:{' '}
+              <input
+                type="number"
+                value={heightScale}
+                onChange={(e) => setHeightScale(Number(e.target.value) || 15)}
+                style={{ ...inputStyle, width: 60 }}
+                min={1}
+                step={5}
+              />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              Pitch: {Math.round(viewState.pitch)}°
+              <input
+                type="range"
+                min={0}
+                max={85}
+                value={viewState.pitch}
+                onChange={(e) => setViewState(v => ({ ...v, pitch: Number(e.target.value) }))}
+                style={{ width: 80 }}
+              />
+            </label>
+          </div>
+        )}
       </div>
 
       {/* Hover tooltip */}
@@ -245,8 +310,9 @@ export default function App() {
             maxWidth: 300,
           }}
         >
-          <div><strong>{hovered.hnum} {hovered.hadd}</strong></div>
-          <div>Block: {hovered.block}-{hovered.lot}{hovered.qual ? `-${hovered.qual}` : ''}</div>
+          {hovered.addr && <div><strong>{hovered.addr}</strong></div>}
+          {hovered.streets && !hovered.addr && <div><strong>{hovered.streets}</strong></div>}
+          <div>Block{hovered.lot ? ': ' : ' '}{hovered.block}{hovered.lot ? `-${hovered.lot}` : ''}{hovered.qual ? `-${hovered.qual}` : ''}</div>
           {hovered.area_sqft !== undefined && hovered.area_sqft > 0 && (
             <div>Area: {hovered.area_sqft.toLocaleString()} sqft</div>
           )}
@@ -273,6 +339,7 @@ export default function App() {
         }}
       >
         {loading ? 'Loading...' : `${data?.length.toLocaleString()} parcels`}
+        <span style={{ marginLeft: 12, color: '#888' }}>Press <kbd style={{ background: '#444', padding: '1px 5px', borderRadius: 3, fontSize: 11 }}>?</kbd> for shortcuts, <kbd style={{ background: '#444', padding: '1px 5px', borderRadius: 3, fontSize: 11 }}>{navigator.platform.includes('Mac') ? '\u2318' : 'Ctrl+'}K</kbd> to search</span>
       </div>
     </div>
   )
