@@ -1,2 +1,3 @@
 # Data files (large, can be regenerated)
 data/
+www/public/*.geojson
