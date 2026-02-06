@@ -1,0 +1,5 @@
+outs:
+- md5: 0bf9bf62aa7e65f1e8ff0aad662ba809
+  size: 19274754
+  hash: md5
+  path: taxes-2019.geojson

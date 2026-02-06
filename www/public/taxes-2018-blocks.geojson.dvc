@@ -1,0 +1,5 @@
+outs:
+- md5: 87d484f654bc5a54acd7d3e18a2b2da8
+  size: 2748587
+  hash: md5
+  path: taxes-2018-blocks.geojson
