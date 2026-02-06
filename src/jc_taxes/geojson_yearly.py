@@ -318,7 +318,7 @@ def generate_yearly_geojson(
         "features": features,
     }
 
-    suffix = {"unit": "-units", "block": "-blocks", "lot": ""}.get(aggregate, "")
+    suffix = {"unit": "-units", "block": "-blocks", "lot": "-lots"}.get(aggregate, "-lots")
     output = output_dir / f"taxes-{year}{suffix}.geojson"
     with open(output, "w") as f:
         json.dump(geojson, f)

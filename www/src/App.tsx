@@ -118,7 +118,7 @@ export default function App() {
 
   useEffect(() => {
     setLoading(true)
-    const suffix = aggregateMode === 'unit' ? '-units' : aggregateMode === 'block' ? '-blocks' : ''
+    const suffix = aggregateMode === 'unit' ? '-units' : aggregateMode === 'block' ? '-blocks' : '-lots'
     fetch(`/taxes-${year}${suffix}.geojson`)
       .then((r) => r.json())
       .then((geojson) => {

@@ -2,4 +2,4 @@ outs:
 - md5: b971b0562cbd5d5739a6394f5e0e7d12
   size: 19279485
   hash: md5
-  path: taxes-2020.geojson
+  path: taxes-2020-lots.geojson
