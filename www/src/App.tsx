@@ -4,6 +4,7 @@ import DeckGL from '@deck.gl/react'
 import { GeoJsonLayer } from '@deck.gl/layers'
 import type { Feature, Polygon, MultiPolygon } from 'geojson'
 import { useUrlState, intParam, stringParam } from 'use-prms'
+import { resolve as dvcResolve } from 'virtual:dvc-data'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { useKeyboardShortcuts } from './useKeyboardShortcuts'
 import { useParcelSearch } from './useParcelSearch'
@@ -119,7 +120,7 @@ export default function App() {
   useEffect(() => {
     setLoading(true)
     const suffix = aggregateMode === 'unit' ? '-units' : aggregateMode === 'block' ? '-blocks' : '-lots'
-    fetch(`/taxes-${year}${suffix}.geojson`)
+    fetch(dvcResolve(`taxes-${year}${suffix}.geojson`))
       .then((r) => r.json())
       .then((geojson) => {
         setData(geojson.features)

@@ -6,6 +6,7 @@
   "scripts": {
     "clean": "rm -rf node_modules/.vite dist",
     "dev": "vite",
+    "dev:s3": "VITE_PLUGIN_DVC_DEV=s3 vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -21,13 +22,14 @@
     "maplibre-gl": "^5.17.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-icons": "^5.5.0",
     "react-map-gl": "^8.1.0",
     "use-kbd": "github:runsascoded/use-kbd#caa1afd04827fe79ff3f313cd7e01b2c08372f78",
     "use-prms": "^0.4.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
-    "@types/node": "^24.10.1",
+    "@types/node": "^25.2.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
@@ -37,6 +39,7 @@
     "globals": "^16.5.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
-    "vite": "^7.2.4"
+    "vite": "^7.2.4",
+    "vite-plugin-dvc": "github:runsascoded/vite-plugin-dvc#57d8f5f71582d4fa42914a569541d82473e8e208"
   }
 }
