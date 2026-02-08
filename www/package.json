@@ -9,7 +9,8 @@
     "dev:s3": "VITE_PLUGIN_DVC_DEV=s3 vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "screenshot": "scrns -h localhost:3201 -c scrns.config.ts -o public && magick public/og.png -crop 1200x630+0+0 +repage public/og.png"
   },
   "dependencies": {
     "@deck.gl/core": "^9.2.6",
@@ -40,6 +41,7 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4",
-    "vite-plugin-dvc": "github:runsascoded/vite-plugin-dvc#57d8f5f71582d4fa42914a569541d82473e8e208"
+    "vite-plugin-dvc": "github:runsascoded/vite-plugin-dvc#57d8f5f71582d4fa42914a569541d82473e8e208",
+    "scrns": "workspace:*"
   }
 }
