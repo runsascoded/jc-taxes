@@ -7,7 +7,7 @@
     "clean": "rm -rf node_modules/.vite dist",
     "dev": "vite",
     "dev:s3": "VITE_PLUGIN_DVC_DEV=s3 vite",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "screenshot": "scrns -h localhost:3201 -c scrns.config.ts -o public && magick public/og.png -crop 1200x630+0+0 +repage public/og.png"
