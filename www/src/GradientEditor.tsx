@@ -13,6 +13,7 @@ type Props = {
   scale: ScaleType
   setScale: (scale: ScaleType) => void
   max: number
+  onReset?: () => void
 }
 
 // Convert value to position (0-1) based on scale
@@ -48,15 +49,16 @@ export function interpolateColor(
   stops: ColorStop[],
   max: number,
   scale: ScaleType,
+  alpha = 180,
 ): [number, number, number, number] {
-  if (stops.length === 0) return [128, 128, 128, 180]
-  if (stops.length === 1) return [...stops[0].color, 180]
+  if (stops.length === 0) return [128, 128, 128, alpha]
+  if (stops.length === 1) return [...stops[0].color, alpha]
 
   const sorted = [...stops].sort((a, b) => a.value - b.value)
 
   // Find surrounding stops
-  if (value <= sorted[0].value) return [...sorted[0].color, 180]
-  if (value >= sorted[sorted.length - 1].value) return [...sorted[sorted.length - 1].color, 180]
+  if (value <= sorted[0].value) return [...sorted[0].color, alpha]
+  if (value >= sorted[sorted.length - 1].value) return [...sorted[sorted.length - 1].color, alpha]
 
   for (let i = 0; i < sorted.length - 1; i++) {
     if (value >= sorted[i].value && value <= sorted[i + 1].value) {
@@ -75,12 +77,12 @@ export function interpolateColor(
         Math.round(c0[0] + t * (c1[0] - c0[0])),
         Math.round(c0[1] + t * (c1[1] - c0[1])),
         Math.round(c0[2] + t * (c1[2] - c0[2])),
-        180,
+        alpha,
       ]
     }
   }
 
-  return [...sorted[sorted.length - 1].color, 180]
+  return [...sorted[sorted.length - 1].color, alpha]
 }
 
 function rgbToHex(r: number, g: number, b: number): string {
@@ -96,7 +98,7 @@ function hexToRgb(hex: string): [number, number, number] {
   ]
 }
 
-export default function GradientEditor({ stops, setStops, scale, setScale, max }: Props) {
+export default function GradientEditor({ stops, setStops, scale, setScale, max, onReset }: Props) {
   const barRef = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState<number | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
@@ -171,9 +173,9 @@ export default function GradientEditor({ stops, setStops, scale, setScale, max }
   }, [stops, setStops])
 
   const inputStyle = {
-    background: '#333',
-    color: 'white',
-    border: '1px solid #555',
+    background: 'var(--input-bg)',
+    color: 'var(--text-primary)',
+    border: '1px solid var(--input-border)',
     borderRadius: 4,
     padding: '2px 4px',
     fontSize: 12,
@@ -188,9 +190,9 @@ export default function GradientEditor({ stops, setStops, scale, setScale, max }
           onChange={(e) => setScale(e.target.value as ScaleType)}
           style={inputStyle}
         >
-          <option value="linear">Linear</option>
-          <option value="sqrt">√ (sqrt)</option>
-          <option value="log">Log</option>
+          <option value="linear">linear</option>
+          <option value="sqrt">sqrt</option>
+          <option value="log">log</option>
         </select>
         <button
           onClick={addStop}
@@ -198,6 +200,15 @@ export default function GradientEditor({ stops, setStops, scale, setScale, max }
         >
           + Add
         </button>
+        {onReset && (
+          <button
+            onClick={onReset}
+            title="Reset to defaults"
+            style={{ ...inputStyle, cursor: 'pointer', padding: '2px 6px', fontSize: 14 }}
+          >
+            ↺
+          </button>
+        )}
       </div>
 
       {/* Gradient bar with handles */}
@@ -208,7 +219,7 @@ export default function GradientEditor({ stops, setStops, scale, setScale, max }
           height: 24,
           background: gradientCss,
           borderRadius: 4,
-          border: '1px solid #555',
+          border: '1px solid var(--input-border)',
           cursor: 'crosshair',
         }}
         onClick={(e) => {
@@ -241,7 +252,7 @@ export default function GradientEditor({ stops, setStops, scale, setScale, max }
                 border: '2px solid white',
                 borderRadius: 3,
                 cursor: 'grab',
-                boxShadow: editingIndex === i ? '0 0 0 2px #4ecdc4' : '0 1px 3px rgba(0,0,0,0.5)',
+                boxShadow: editingIndex === i ? '0 0 0 2px var(--text-accent)' : '0 1px 3px rgba(0,0,0,0.5)',
               }}
             />
           )
@@ -255,7 +266,7 @@ export default function GradientEditor({ stops, setStops, scale, setScale, max }
           alignItems: 'center',
           gap: 8,
           padding: '4px 8px',
-          background: '#222',
+          background: 'var(--bg-tertiary)',
           borderRadius: 4,
         }}>
           <input
@@ -273,7 +284,7 @@ export default function GradientEditor({ stops, setStops, scale, setScale, max }
             step={1}
             min={0}
           />
-          <span style={{ color: '#888', fontSize: 11 }}>/sqft</span>
+          <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>/sqft</span>
           <button
             onClick={() => {
               removeStop(editingIndex)
@@ -293,7 +304,7 @@ export default function GradientEditor({ stops, setStops, scale, setScale, max }
       )}
 
       {/* Labels */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#888' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-secondary)' }}>
         <span>$0</span>
         <span>${max}/sqft</span>
       </div>
@@ -326,8 +337,14 @@ export function decodeStops(str: string): ColorStop[] | null {
   }
 }
 
-export const DEFAULT_STOPS: ColorStop[] = [
-  { value: 0, color: [96, 96, 96] },      // grey
-  { value: 3.8, color: [255, 0, 0] },     // red
-  { value: 22.4, color: [0, 255, 0] },    // green
+export const DEFAULT_STOPS_DARK: ColorStop[] = [
+  { value: 0, color: [96, 96, 96] },
+  { value: 3.8, color: [255, 0, 0] },
+  { value: 22.4, color: [0, 255, 0] },
+]
+
+export const DEFAULT_STOPS_LIGHT: ColorStop[] = [
+  { value: 0, color: [176, 176, 176] },
+  { value: 3.8, color: [255, 71, 71] },
+  { value: 22.4, color: [0, 214, 0] },
 ]

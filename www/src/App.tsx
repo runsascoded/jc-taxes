@@ -8,13 +8,10 @@ import { resolve as dvcResolve } from 'virtual:dvc-data'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { useKeyboardShortcuts } from './useKeyboardShortcuts'
 import { useParcelSearch } from './useParcelSearch'
+import { useTheme } from './ThemeContext'
 import GradientEditor, {
-  type ColorStop,
   type ScaleType,
   interpolateColor,
-  encodeStops,
-  decodeStops,
-  DEFAULT_STOPS,
 } from './GradientEditor'
 
 const DEFAULT_VIEW = {
@@ -29,12 +26,6 @@ const AGGREGATE_MODES = ['lot', 'unit', 'block'] as const
 type AggregateMode = typeof AGGREGATE_MODES[number]
 
 const HIGHLIGHT_COLOR: [number, number, number, number] = [255, 255, 100, 220]
-
-// Custom param for color stops
-const stopsParam = (defaultVal: ColorStop[]) => ({
-  decode: (s: string | null) => (s ? decodeStops(s) : null) ?? defaultVal,
-  encode: (v: ColorStop[]) => encodeStops(v),
-})
 
 const scaleParam = (defaultVal: ScaleType) => ({
   decode: (s: string | null) => (s as ScaleType) ?? defaultVal,
@@ -74,7 +65,6 @@ export default function App() {
   const [maxPerSqft, setMaxPerSqft] = useUrlState('max', intParam(300))
   const [heightScale, setHeightScale] = useUrlState('hs', intParam(15))
   const [aggregateMode, setAggregateMode] = useUrlState('agg', stringParam('block'))
-  const [colorStops, setColorStops] = useUrlState('stops', stopsParam(DEFAULT_STOPS))
   const [colorScale, setColorScale] = useUrlState('scale', scaleParam('log'))
 
   // Track view state locally (not in URL to avoid re-renders)
@@ -137,13 +127,23 @@ export default function App() {
     return `${p?.block || ''}-${p?.lot || ''}-${p?.qual || ''}`
   }, [])
 
+  const { actualTheme, colorStops, setColorStops, resetColorStops } = useTheme()
+  const mapStyle = actualTheme === 'dark'
+    ? 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
+    : 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
+
+  const fillAlpha = actualTheme === 'dark' ? 180 : 220
+  const lineColor: [number, number, number, number] = actualTheme === 'dark'
+    ? [100, 100, 100, 100]
+    : [60, 60, 60, 160]
+
   const getFillColor = useCallback((f: ParcelFeature): [number, number, number, number] => {
     const id = getFeatureId(f)
     if (id === hoveredId) return HIGHLIGHT_COLOR
 
     const perSqft = f.properties?.paid_per_sqft ?? 0
-    return interpolateColor(perSqft, colorStops, maxPerSqft, colorScale)
-  }, [colorStops, colorScale, maxPerSqft, hoveredId, getFeatureId])
+    return interpolateColor(perSqft, colorStops, maxPerSqft, colorScale, fillAlpha)
+  }, [colorStops, colorScale, maxPerSqft, hoveredId, getFeatureId, fillAlpha])
 
   const layers = [
     new GeoJsonLayer<ParcelFeature>({
@@ -154,7 +154,7 @@ export default function App() {
       wireframe: true,
       getFillColor,
       getElevation: (f) => getElevation(f.properties?.paid_per_sqft ?? 0, maxPerSqft, heightScale),
-      getLineColor: [100, 100, 100, 100],
+      getLineColor: lineColor,
       lineWidthMinPixels: 1,
       pickable: true,
       onHover: ({ object }) => {
@@ -167,16 +167,17 @@ export default function App() {
         }
       },
       updateTriggers: {
-        getFillColor: [year, maxPerSqft, colorStops, colorScale, hoveredId, aggregateMode],
+        getFillColor: [year, maxPerSqft, colorStops, colorScale, hoveredId, aggregateMode, actualTheme],
         getElevation: [year, maxPerSqft, heightScale, aggregateMode],
+        getLineColor: [actualTheme],
       },
     }),
   ]
 
   const inputStyle = {
-    background: '#333',
-    color: 'white',
-    border: '1px solid #555',
+    background: 'var(--input-bg)',
+    color: 'var(--text-primary)',
+    border: '1px solid var(--input-border)',
     borderRadius: 4,
     padding: '4px 8px',
     fontSize: 14,
@@ -192,7 +193,7 @@ export default function App() {
         deviceProps={{ type: 'webgl' }}
       >
         <Map
-          mapStyle="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+          mapStyle={mapStyle}
           maxPitch={85}
         />
       </DeckGL>
@@ -203,8 +204,8 @@ export default function App() {
           position: 'absolute',
           top: 10,
           right: 10,
-          background: 'rgba(0,0,0,0.8)',
-          color: 'white',
+          background: 'var(--panel-bg)',
+          color: 'var(--text-primary)',
           borderRadius: 4,
           fontSize: 14,
           minWidth: settingsOpen ? 240 : undefined,
@@ -248,14 +249,15 @@ export default function App() {
                 style={{ ...inputStyle, width: 70 }}
               />
             </label>
-            <div style={{ borderTop: '1px solid #444', paddingTop: 8, marginTop: 4 }}>
-              <div style={{ marginBottom: 6, fontSize: 12, color: '#aaa' }}>Color Gradient</div>
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 4 }}>
+              <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--text-secondary)' }}>Color Gradient</div>
               <GradientEditor
                 stops={colorStops}
                 setStops={setColorStops}
                 scale={colorScale}
                 setScale={setColorScale}
                 max={maxPerSqft}
+                onReset={resetColorStops}
               />
             </div>
             <label>
@@ -303,8 +305,8 @@ export default function App() {
             position: 'absolute',
             top: 10,
             left: 10,
-            background: 'rgba(0,0,0,0.8)',
-            color: 'white',
+            background: 'var(--panel-bg)',
+            color: 'var(--text-primary)',
             padding: '10px 15px',
             borderRadius: 4,
             fontSize: 14,
@@ -321,7 +323,7 @@ export default function App() {
             <div>Paid ({year}): ${hovered.paid.toLocaleString()}</div>
           )}
           {hovered.paid_per_sqft !== undefined && hovered.paid_per_sqft > 0 && (
-            <div style={{ color: '#4ecdc4' }}>${hovered.paid_per_sqft.toFixed(2)}/sqft</div>
+            <div style={{ color: 'var(--text-accent)' }}>${hovered.paid_per_sqft.toFixed(2)}/sqft</div>
           )}
         </div>
       )}
@@ -332,15 +334,15 @@ export default function App() {
           position: 'absolute',
           bottom: 10,
           left: 10,
-          background: 'rgba(0,0,0,0.8)',
-          color: 'white',
+          background: 'var(--panel-bg)',
+          color: 'var(--text-primary)',
           padding: '8px 12px',
           borderRadius: 4,
           fontSize: 12,
         }}
       >
         {loading ? 'Loading...' : `${data?.length.toLocaleString()} parcels`}
-        <span style={{ marginLeft: 12, color: '#888' }}>Press <kbd style={{ background: '#444', padding: '1px 5px', borderRadius: 3, fontSize: 11 }}>?</kbd> for shortcuts, <kbd style={{ background: '#444', padding: '1px 5px', borderRadius: 3, fontSize: 11 }}>{navigator.platform.includes('Mac') ? '\u2318' : 'Ctrl+'}K</kbd> to search</span>
+        <span style={{ marginLeft: 12, color: 'var(--text-secondary)' }}>Press <kbd style={{ background: 'var(--input-bg)', padding: '1px 5px', borderRadius: 3, fontSize: 11 }}>?</kbd> for shortcuts, <kbd style={{ background: 'var(--input-bg)', padding: '1px 5px', borderRadius: 3, fontSize: 11 }}>{navigator.platform.includes('Mac') ? '\u2318' : 'Ctrl+'}K</kbd> to search</span>
       </div>
     </div>
   )
