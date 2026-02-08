@@ -1,7 +1,16 @@
 import { useAction } from 'use-kbd'
+import type { Dispatch, SetStateAction } from 'react'
 
 const AVAILABLE_YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
 const AGGREGATE_MODES = ['block', 'lot', 'unit'] as const
+
+export type ViewState = {
+  latitude: number
+  longitude: number
+  zoom: number
+  pitch: number
+  bearing: number
+}
 
 type Props = {
   year: number
@@ -10,6 +19,7 @@ type Props = {
   setAggregateMode: (m: string) => void
   settingsOpen: boolean
   setSettingsOpen: (v: boolean | ((v: boolean) => boolean)) => void
+  setViewState: Dispatch<SetStateAction<ViewState>>
 }
 
 export function useKeyboardShortcuts({
@@ -19,6 +29,7 @@ export function useKeyboardShortcuts({
   setAggregateMode,
   settingsOpen,
   setSettingsOpen,
+  setViewState,
 }: Props) {
   useAction('year:prev', {
     label: 'Previous year',
@@ -62,18 +73,13 @@ export function useKeyboardShortcuts({
     label: 'Flat view (pitch 0)',
     group: 'UI',
     defaultBindings: ['f'],
-    handler: () => {
-      // Dispatch a custom event that App.tsx listens for
-      window.dispatchEvent(new CustomEvent('set-pitch', { detail: 0 }))
-    },
+    handler: () => setViewState(v => ({ ...v, pitch: 0 })),
   })
 
   useAction('view:3d', {
     label: '3D view (pitch 45)',
     group: 'UI',
     defaultBindings: ['d'],
-    handler: () => {
-      window.dispatchEvent(new CustomEvent('set-pitch', { detail: 45 }))
-    },
+    handler: () => setViewState(v => ({ ...v, pitch: 45 })),
   })
 }

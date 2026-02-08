@@ -1,12 +1,13 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Map } from 'react-map-gl/maplibre'
 import DeckGL from '@deck.gl/react'
 import { GeoJsonLayer } from '@deck.gl/layers'
 import type { Feature, Polygon, MultiPolygon } from 'geojson'
 import { useUrlState, intParam, stringParam } from 'use-prms'
+import type { Param } from 'use-prms'
 import { resolve as dvcResolve } from 'virtual:dvc-data'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import { useKeyboardShortcuts } from './useKeyboardShortcuts'
+import { useKeyboardShortcuts, type ViewState } from './useKeyboardShortcuts'
 import { useParcelSearch } from './useParcelSearch'
 import { useTheme } from './ThemeContext'
 import GradientEditor, {
@@ -14,11 +15,51 @@ import GradientEditor, {
   interpolateColor,
 } from './GradientEditor'
 
-const DEFAULT_VIEW = {
+const DEFAULT_VIEW: ViewState = {
   latitude: 40.7178,
   longitude: -74.0431,
   zoom: 12,
+  pitch: 45,
   bearing: 0,
+}
+
+function encodeView(v: ViewState): string {
+  const parts = [
+    v.latitude.toFixed(4),
+    v.longitude.toFixed(4),
+    v.zoom.toFixed(1),
+    String(Math.round(v.pitch)),
+    String(Math.round(v.bearing)),
+  ]
+  let result = parts[0]
+  for (let i = 1; i < parts.length; i++) {
+    if (!parts[i].startsWith('-')) result += ' '
+    result += parts[i]
+  }
+  return result
+}
+
+const DEFAULT_VIEW_ENCODED = encodeView(DEFAULT_VIEW)
+
+const viewParam: Param<ViewState> = {
+  encode: (v: ViewState) => {
+    const encoded = encodeView(v)
+    return encoded === DEFAULT_VIEW_ENCODED ? undefined : encoded
+  },
+  decode: (s: string | undefined) => {
+    if (!s) return DEFAULT_VIEW
+    const matches = s.match(/-?\d+\.?\d*/g)
+    if (!matches || matches.length < 5) return DEFAULT_VIEW
+    const nums = matches.map(Number)
+    if (nums.some(isNaN)) return DEFAULT_VIEW
+    return {
+      latitude: nums[0],
+      longitude: nums[1],
+      zoom: nums[2],
+      pitch: nums[3],
+      bearing: nums[4],
+    }
+  },
 }
 
 const AVAILABLE_YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
@@ -57,6 +98,7 @@ export default function App() {
   const [data, setData] = useState<ParcelFeature[] | null>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [hovered, setHovered] = useState<ParcelProperties | null>(null)
+  const [selectedId, setSelectedId] = useUrlState('sel', stringParam())
   const [loading, setLoading] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(true)
 
@@ -67,24 +109,28 @@ export default function App() {
   const [aggregateMode, setAggregateMode] = useUrlState('agg', stringParam('block'))
   const [colorScale, setColorScale] = useUrlState('scale', scaleParam('log'))
 
-  // Track view state locally (not in URL to avoid re-renders)
-  const [viewState, setViewState] = useState({
-    ...DEFAULT_VIEW,
-    pitch: 45,
-  })
+  // URL is source of truth for initial load; local state for smooth rendering
+  const [urlView, setUrlView] = useUrlState('v', viewParam)
+  const [viewState, setViewState] = useState<ViewState>(urlView)
+  // Debounce URL writes whenever viewState changes (from any source)
+  const setUrlViewRef = useRef(setUrlView)
+  setUrlViewRef.current = setUrlView
+  useEffect(() => {
+    const timer = setTimeout(() => setUrlViewRef.current(viewState), 300)
+    return () => clearTimeout(timer)
+  }, [viewState])
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
     year, setYear,
     aggregateMode, setAggregateMode,
     settingsOpen, setSettingsOpen,
+    setViewState,
   })
 
   // Omnibar search over parcels
   const onParcelSelect = useCallback((f: ParcelFeature) => {
-    const p = f.properties
-    setHoveredId(`${p?.block || ''}-${p?.lot || ''}-${p?.qual || ''}`)
-    setHovered(p ?? null)
+    setSelectedId(getFeatureId(f))
     // Pan to the selected parcel
     if (f.geometry) {
       const coords = f.geometry.type === 'Polygon' ? f.geometry.coordinates[0] : f.geometry.coordinates[0][0]
@@ -96,16 +142,6 @@ export default function App() {
     }
   }, [])
   useParcelSearch({ data, onSelect: onParcelSelect })
-
-  // Listen for pitch changes from keyboard shortcuts
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const pitch = (e as CustomEvent).detail
-      setViewState(v => ({ ...v, pitch }))
-    }
-    window.addEventListener('set-pitch', handler)
-    return () => window.removeEventListener('set-pitch', handler)
-  }, [])
 
   useEffect(() => {
     setLoading(true)
@@ -124,8 +160,14 @@ export default function App() {
 
   const getFeatureId = useCallback((f: ParcelFeature) => {
     const p = f.properties
-    return `${p?.block || ''}-${p?.lot || ''}-${p?.qual || ''}`
+    return `${p?.block || ''}-${p?.lot || ''}-${p?.qual || ''}`.replace(/-+$/, '')
   }, [])
+
+  const selected = useMemo(() => {
+    if (!selectedId || !data) return null
+    const feature = data.find(f => getFeatureId(f) === selectedId)
+    return feature?.properties ?? null
+  }, [selectedId, data, getFeatureId])
 
   const { actualTheme, colorStops, setColorStops, resetColorStops } = useTheme()
   const mapStyle = actualTheme === 'dark'
@@ -139,11 +181,11 @@ export default function App() {
 
   const getFillColor = useCallback((f: ParcelFeature): [number, number, number, number] => {
     const id = getFeatureId(f)
-    if (id === hoveredId) return HIGHLIGHT_COLOR
+    if (id === selectedId || id === hoveredId) return HIGHLIGHT_COLOR
 
     const perSqft = f.properties?.paid_per_sqft ?? 0
     return interpolateColor(perSqft, colorStops, maxPerSqft, colorScale, fillAlpha)
-  }, [colorStops, colorScale, maxPerSqft, hoveredId, getFeatureId, fillAlpha])
+  }, [colorStops, colorScale, maxPerSqft, hoveredId, selectedId, getFeatureId, fillAlpha])
 
   const layers = [
     new GeoJsonLayer<ParcelFeature>({
@@ -166,8 +208,16 @@ export default function App() {
           setHovered(null)
         }
       },
+      onClick: ({ object }) => {
+        if (object) {
+          const id = getFeatureId(object)
+          setSelectedId(id === selectedId ? undefined : id)
+        } else {
+          setSelectedId(undefined)
+        }
+      },
       updateTriggers: {
-        getFillColor: [year, maxPerSqft, colorStops, colorScale, hoveredId, aggregateMode, actualTheme],
+        getFillColor: [year, maxPerSqft, colorStops, colorScale, hoveredId, selectedId, aggregateMode, actualTheme],
         getElevation: [year, maxPerSqft, heightScale, aggregateMode],
         getLineColor: [actualTheme],
       },
@@ -184,10 +234,13 @@ export default function App() {
   }
 
   return (
-    <div style={{ width: '100vw', height: '100vh' }}>
+    <div style={{ width: '100vw', height: '100vh', WebkitTouchCallout: 'none' }} onContextMenu={e => e.preventDefault()}>
       <DeckGL
         viewState={viewState}
-        onViewStateChange={({ viewState: vs }) => setViewState(vs as typeof viewState)}
+        onViewStateChange={({ viewState: vs }) => {
+          const { latitude, longitude, zoom, pitch, bearing } = vs as ViewState
+          setViewState({ latitude, longitude, zoom, pitch, bearing })
+        }}
         controller={{ maxPitch: 85 }}
         layers={layers}
         deviceProps={{ type: 'webgl' }}
@@ -298,35 +351,38 @@ export default function App() {
         )}
       </div>
 
-      {/* Hover tooltip */}
-      {hovered && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 10,
-            left: 10,
-            background: 'var(--panel-bg)',
-            color: 'var(--text-primary)',
-            padding: '10px 15px',
-            borderRadius: 4,
-            fontSize: 14,
-            maxWidth: 300,
-          }}
-        >
-          {hovered.addr && <div><strong>{hovered.addr}</strong></div>}
-          {hovered.streets && !hovered.addr && <div><strong>{hovered.streets}</strong></div>}
-          <div>Block{hovered.lot ? ': ' : ' '}{hovered.block}{hovered.lot ? `-${hovered.lot}` : ''}{hovered.qual ? `-${hovered.qual}` : ''}</div>
-          {hovered.area_sqft !== undefined && hovered.area_sqft > 0 && (
-            <div>Area: {hovered.area_sqft.toLocaleString()} sqft</div>
-          )}
-          {hovered.paid !== undefined && hovered.paid > 0 && (
-            <div>Paid ({year}): ${hovered.paid.toLocaleString()}</div>
-          )}
-          {hovered.paid_per_sqft !== undefined && hovered.paid_per_sqft > 0 && (
-            <div style={{ color: 'var(--text-accent)' }}>${hovered.paid_per_sqft.toFixed(2)}/sqft</div>
-          )}
-        </div>
-      )}
+      {/* Hover/selected tooltip */}
+      {(hovered || selected) && (() => {
+        const info = hovered ?? selected!
+        return (
+          <div
+            style={{
+              position: 'absolute',
+              top: 10,
+              left: 10,
+              background: 'var(--panel-bg)',
+              color: 'var(--text-primary)',
+              padding: '10px 15px',
+              borderRadius: 4,
+              fontSize: 14,
+              maxWidth: 300,
+            }}
+          >
+            {info.addr && <div><strong>{info.addr}</strong></div>}
+            {info.streets && !info.addr && <div><strong>{info.streets}</strong></div>}
+            <div>Block{info.lot ? ': ' : ' '}{info.block}{info.lot ? `-${info.lot}` : ''}{info.qual ? `-${info.qual}` : ''}</div>
+            {info.area_sqft !== undefined && info.area_sqft > 0 && (
+              <div>Area: {info.area_sqft.toLocaleString()} sqft</div>
+            )}
+            {info.paid !== undefined && info.paid > 0 && (
+              <div>Paid ({year}): ${info.paid.toLocaleString()}</div>
+            )}
+            {info.paid_per_sqft !== undefined && info.paid_per_sqft > 0 && (
+              <div style={{ color: 'var(--text-accent)' }}>${info.paid_per_sqft.toFixed(2)}/sqft</div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Status bar */}
       <div
