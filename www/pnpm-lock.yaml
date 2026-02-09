@@ -79,8 +79,8 @@ importers:
         specifier: ^16.5.0
         version: 16.5.0
       scrns:
-        specifier: workspace:*
-        version: link:../../js/scrns
+        specifier: https://gitlab.com/runsascoded/js/scrns/-/archive/52832889daf72b90653dd6546ef0d8981428a281/scrns-52832889daf72b90653dd6546ef0d8981428a281.tar.gz
+        version: https://gitlab.com/runsascoded/js/scrns/-/archive/52832889daf72b90653dd6546ef0d8981428a281/scrns-52832889daf72b90653dd6546ef0d8981428a281.tar.gz(typescript@5.9.3)
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
@@ -2854,6 +2854,11 @@ packages:
 
   scheduler@0.27.0:
     resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
+
+  scrns@https://gitlab.com/runsascoded/js/scrns/-/archive/52832889daf72b90653dd6546ef0d8981428a281/scrns-52832889daf72b90653dd6546ef0d8981428a281.tar.gz:
+    resolution: {tarball: https://gitlab.com/runsascoded/js/scrns/-/archive/52832889daf72b90653dd6546ef0d8981428a281/scrns-52832889daf72b90653dd6546ef0d8981428a281.tar.gz}
+    version: 0.2.1-dist.a159c0f
+    hasBin: true
 
   seedrandom@3.0.5:
     resolution: {integrity: sha512-8OwmbklUNzwezjGInmZ+2clQmExQPvomqjL7LFqOYqtmuxRgQYqOD3mHaU+MvZn5FLUeVxVfQjwLZW/n/JFuqg==}
@@ -6445,6 +6450,19 @@ snapshots:
   sax@1.4.4: {}
 
   scheduler@0.27.0: {}
+
+  scrns@https://gitlab.com/runsascoded/js/scrns/-/archive/52832889daf72b90653dd6546ef0d8981428a281/scrns-52832889daf72b90653dd6546ef0d8981428a281.tar.gz(typescript@5.9.3):
+    dependencies:
+      commander: 12.1.0
+      puppeteer: 23.11.1(typescript@5.9.3)
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
 
   seedrandom@3.0.5: {}
 
