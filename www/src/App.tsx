@@ -83,7 +83,8 @@ const AVAILABLE_YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
 const AGGREGATE_MODES = ['lot', 'unit', 'block'] as const
 type AggregateMode = typeof AGGREGATE_MODES[number]
 
-const HIGHLIGHT_COLOR: [number, number, number, number] = [255, 255, 100, 220]
+const HOVER_COLOR: [number, number, number, number] = [255, 255, 100, 220]
+const SELECTED_COLOR: [number, number, number, number] = [100, 200, 255, 230]
 
 const scaleParam = (defaultVal: ScaleType) => ({
   decode: (s: string | null) => (s as ScaleType) ?? defaultVal,
@@ -116,6 +117,7 @@ export default function App() {
   const [data, setData] = useState<ParcelFeature[] | null>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [hovered, setHovered] = useState<ParcelProperties | null>(null)
+  const suppressHoverRef = useRef(false)
   const [selectedId, setSelectedId] = useUrlState('sel', stringParam())
   const selectedIdRef = useRef(selectedId)
   selectedIdRef.current = selectedId
@@ -209,7 +211,8 @@ export default function App() {
 
   const getFillColor = useCallback((f: ParcelFeature): [number, number, number, number] => {
     const id = getFeatureId(f)
-    if (id === selectedId || id === hoveredId) return HIGHLIGHT_COLOR
+    if (id === selectedId) return SELECTED_COLOR
+    if (id === hoveredId) return HOVER_COLOR
 
     const perSqft = f.properties?.paid_per_sqft ?? 0
     return interpolateColor(perSqft, colorStops, maxPerSqft, colorScale, fillAlpha)
@@ -228,6 +231,7 @@ export default function App() {
       lineWidthMinPixels: 1,
       pickable: true,
       onHover: ({ object }) => {
+        if (suppressHoverRef.current) return
         if (object) {
           setHoveredId(getFeatureId(object))
           setHovered(object.properties ?? null)
@@ -240,7 +244,11 @@ export default function App() {
         if (object) {
           const id = getFeatureId(object)
           setSelectedId(id === selectedIdRef.current ? undefined : id)
-          return true  // handled — prevent DeckGL onClick from also firing
+          suppressHoverRef.current = true
+          setHoveredId(null)
+          setHovered(null)
+          setTimeout(() => { suppressHoverRef.current = false }, 100)
+          return true
         }
       },
       updateTriggers: {
@@ -269,7 +277,13 @@ export default function App() {
           setViewState({ latitude, longitude, zoom, pitch, bearing })
         }}
         onClick={({ object }) => {
-          if (!object && !kbdCtx?.isOmnibarOpen) setSelectedId(undefined)
+          if (!object && !kbdCtx?.isOmnibarOpen) {
+            setSelectedId(undefined)
+            suppressHoverRef.current = true
+            setHoveredId(null)
+            setHovered(null)
+            setTimeout(() => { suppressHoverRef.current = false }, 100)
+          }
           if (window.innerWidth <= 768) setSettingsOpen(false)
         }}
         controller={{ maxPitch: 85, touchRotate: true }}
