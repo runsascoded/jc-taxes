@@ -5,7 +5,7 @@ import { GeoJsonLayer } from '@deck.gl/layers'
 import type { Feature, Polygon, MultiPolygon } from 'geojson'
 import { useUrlState, intParam, stringParam } from 'use-prms'
 import type { Param } from 'use-prms'
-import { KbdModal, KbdOmnibar } from 'use-kbd'
+import { KbdModal, KbdOmnibar, useHotkeysContext } from 'use-kbd'
 import { resolve as dvcResolve } from 'virtual:dvc-data'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { useKeyboardShortcuts, type ViewState } from './useKeyboardShortcuts'
@@ -112,10 +112,13 @@ type ParcelProperties = {
 type ParcelFeature = Feature<Polygon | MultiPolygon, ParcelProperties>
 
 export default function App() {
+  const kbdCtx = useHotkeysContext()
   const [data, setData] = useState<ParcelFeature[] | null>(null)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [hovered, setHovered] = useState<ParcelProperties | null>(null)
   const [selectedId, setSelectedId] = useUrlState('sel', stringParam())
+  const selectedIdRef = useRef(selectedId)
+  selectedIdRef.current = selectedId
   const [loading, setLoading] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(() => window.innerWidth > 768)
 
@@ -129,11 +132,17 @@ export default function App() {
   // URL is source of truth for initial load; local state for smooth rendering
   const [urlView, setUrlView] = useUrlState('v', viewParam)
   const [viewState, setViewState] = useState<ViewState>(urlView)
-  // Debounce URL writes whenever viewState changes (from any source)
+  // Debounce URL writes whenever viewState changes (from any source).
+  // Skip while omnibar is open: the synthetic popstate from replaceState
+  // races with use-kbd's history pushState and can close the omnibar.
   const setUrlViewRef = useRef(setUrlView)
   setUrlViewRef.current = setUrlView
+  const omnibarOpenRef = useRef(false)
+  omnibarOpenRef.current = !!kbdCtx?.isOmnibarOpen
   useEffect(() => {
-    const timer = setTimeout(() => setUrlViewRef.current(viewState), 300)
+    const timer = setTimeout(() => {
+      if (!omnibarOpenRef.current) setUrlViewRef.current(viewState)
+    }, 300)
     return () => clearTimeout(timer)
   }, [viewState])
 
@@ -230,9 +239,8 @@ export default function App() {
       onClick: ({ object }) => {
         if (object) {
           const id = getFeatureId(object)
-          setSelectedId(id === selectedId ? undefined : id)
-        } else {
-          setSelectedId(undefined)
+          setSelectedId(id === selectedIdRef.current ? undefined : id)
+          return true  // handled — prevent DeckGL onClick from also firing
         }
       },
       updateTriggers: {
@@ -261,10 +269,8 @@ export default function App() {
           setViewState({ latitude, longitude, zoom, pitch, bearing })
         }}
         onClick={({ object }) => {
-          if (!object) {
-            setSelectedId(undefined)
-            if (window.innerWidth <= 768) setSettingsOpen(false)
-          }
+          if (!object && !kbdCtx?.isOmnibarOpen) setSelectedId(undefined)
+          if (window.innerWidth <= 768) setSettingsOpen(false)
         }}
         controller={{ maxPitch: 85, touchRotate: true }}
         layers={layers}
@@ -282,6 +288,7 @@ export default function App() {
           position: 'absolute',
           top: 10,
           right: 10,
+          zIndex: 1,
           background: 'var(--panel-bg)',
           color: 'var(--text-primary)',
           borderRadius: 4,
