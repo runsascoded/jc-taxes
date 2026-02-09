@@ -257,7 +257,12 @@ export default function App() {
           const { latitude, longitude, zoom, pitch, bearing } = vs as ViewState
           setViewState({ latitude, longitude, zoom, pitch, bearing })
         }}
-        onClick={({ object }) => { if (!object) setSelectedId(undefined) }}
+        onClick={({ object }) => {
+          if (!object) {
+            setSelectedId(undefined)
+            if (window.innerWidth <= 768) setSettingsOpen(false)
+          }
+        }}
         controller={{ maxPitch: 85, touchRotate: true }}
         layers={layers}
         deviceProps={{ type: 'webgl' }}

@@ -316,13 +316,13 @@ export default function GradientEditor({ stops, setStops, scale, setScale, max, 
 export function encodeStops(stops: ColorStop[]): string {
   return stops
     .map(s => `${s.value}:${s.color.map(c => c.toString(16).padStart(2, '0')).join('')}`)
-    .join(',')
+    .join(' ')
 }
 
 export function decodeStops(str: string): ColorStop[] | null {
   try {
     if (!str) return null
-    return str.split(',').map(part => {
+    return str.split(/[, ]+/).map(part => {
       const [valueStr, colorStr] = part.split(':')
       const value = parseFloat(valueStr)
       const color: [number, number, number] = [
@@ -344,7 +344,7 @@ export const DEFAULT_STOPS_DARK: ColorStop[] = [
 ]
 
 export const DEFAULT_STOPS_LIGHT: ColorStop[] = [
-  { value: 0, color: [176, 176, 176] },
+  { value: 0, color: [255, 255, 255] },
   { value: 3.8, color: [255, 71, 71] },
   { value: 22.4, color: [0, 214, 0] },
 ]
