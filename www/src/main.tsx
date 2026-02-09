@@ -6,6 +6,9 @@ import './index.css'
 import App from './App.tsx'
 import { ThemeProvider } from './ThemeContext'
 import ThemeToggle from './ThemeToggle'
+import MobileSpeedDial from './MobileSpeedDial'
+
+const isMobile = window.innerWidth <= 768
 
 function AppWithModals() {
   const { isModalOpen, closeModal } = useHotkeysContext()
@@ -14,7 +17,7 @@ function AppWithModals() {
       <App />
       <ShortcutsModal isOpen={isModalOpen} onClose={closeModal} editable />
       <Omnibar />
-      <ThemeToggle />
+      {isMobile ? <MobileSpeedDial /> : <ThemeToggle />}
     </>
   )
 }
