@@ -32,13 +32,15 @@ export function useKeyboardShortcuts({
   setViewState,
   toggleTheme,
 }: Props) {
+  const yearIdx = AVAILABLE_YEARS.indexOf(year)
+
   useAction('year:prev', {
     label: 'Previous year',
     group: 'Navigation',
     defaultBindings: ['arrowleft'],
+    enabled: yearIdx > 0,
     handler: () => {
-      const idx = AVAILABLE_YEARS.indexOf(year)
-      if (idx > 0) setYear(AVAILABLE_YEARS[idx - 1])
+      if (yearIdx > 0) setYear(AVAILABLE_YEARS[yearIdx - 1])
     },
   })
 
@@ -46,9 +48,9 @@ export function useKeyboardShortcuts({
     label: 'Next year',
     group: 'Navigation',
     defaultBindings: ['arrowright'],
+    enabled: yearIdx < AVAILABLE_YEARS.length - 1,
     handler: () => {
-      const idx = AVAILABLE_YEARS.indexOf(year)
-      if (idx < AVAILABLE_YEARS.length - 1) setYear(AVAILABLE_YEARS[idx + 1])
+      if (yearIdx < AVAILABLE_YEARS.length - 1) setYear(AVAILABLE_YEARS[yearIdx + 1])
     },
   })
 
