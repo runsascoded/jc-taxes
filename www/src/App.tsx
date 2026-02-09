@@ -15,13 +15,34 @@ import GradientEditor, {
   interpolateColor,
 } from './GradientEditor'
 
-const DEFAULT_VIEW: ViewState = {
-  latitude: 40.7178,
-  longitude: -74.0431,
-  zoom: 12,
-  pitch: 45,
-  bearing: 0,
+// Responsive default views: interpolated by viewport width
+const VIEW_BREAKPOINTS: { width: number, view: ViewState }[] = [
+  { width: 390,  view: { latitude: 40.6960, longitude: -74.0641, zoom: 11.5, pitch: 45, bearing: -16 } }, // phone
+  { width: 820,  view: { latitude: 40.7197, longitude: -74.0506, zoom: 12.0, pitch: 45, bearing: 0 } },   // iPad
+  { width: 1180, view: { latitude: 40.7153, longitude: -74.0605, zoom: 12.6, pitch: 48, bearing: -16 } }, // iPad Pro landscape
+  { width: 1440, view: { latitude: 40.7177, longitude: -74.0695, zoom: 12.8, pitch: 54, bearing: -10 } }, // desktop
+]
+
+function getDefaultView(width: number): ViewState {
+  if (width <= VIEW_BREAKPOINTS[0].width) return VIEW_BREAKPOINTS[0].view
+  if (width >= VIEW_BREAKPOINTS[VIEW_BREAKPOINTS.length - 1].width) return VIEW_BREAKPOINTS[VIEW_BREAKPOINTS.length - 1].view
+  for (let i = 0; i < VIEW_BREAKPOINTS.length - 1; i++) {
+    const lo = VIEW_BREAKPOINTS[i], hi = VIEW_BREAKPOINTS[i + 1]
+    if (width >= lo.width && width <= hi.width) {
+      const t = (width - lo.width) / (hi.width - lo.width)
+      return {
+        latitude: lo.view.latitude + t * (hi.view.latitude - lo.view.latitude),
+        longitude: lo.view.longitude + t * (hi.view.longitude - lo.view.longitude),
+        zoom: lo.view.zoom + t * (hi.view.zoom - lo.view.zoom),
+        pitch: lo.view.pitch + t * (hi.view.pitch - lo.view.pitch),
+        bearing: lo.view.bearing + t * (hi.view.bearing - lo.view.bearing),
+      }
+    }
+  }
+  return VIEW_BREAKPOINTS[VIEW_BREAKPOINTS.length - 1].view
 }
+
+const DEFAULT_VIEW = getDefaultView(window.innerWidth)
 
 function encodeView(v: ViewState): string {
   const parts = [
@@ -39,13 +60,8 @@ function encodeView(v: ViewState): string {
   return result
 }
 
-const DEFAULT_VIEW_ENCODED = encodeView(DEFAULT_VIEW)
-
 const viewParam: Param<ViewState> = {
-  encode: (v: ViewState) => {
-    const encoded = encodeView(v)
-    return encoded === DEFAULT_VIEW_ENCODED ? undefined : encoded
-  },
+  encode: encodeView,
   decode: (s: string | undefined) => {
     if (!s) return DEFAULT_VIEW
     const matches = s.match(/-?\d+\.?\d*/g)
@@ -100,7 +116,7 @@ export default function App() {
   const [hovered, setHovered] = useState<ParcelProperties | null>(null)
   const [selectedId, setSelectedId] = useUrlState('sel', stringParam())
   const [loading, setLoading] = useState(true)
-  const [settingsOpen, setSettingsOpen] = useState(true)
+  const [settingsOpen, setSettingsOpen] = useState(() => window.innerWidth > 768)
 
   // URL-persisted state
   const [year, setYear] = useUrlState('y', intParam(2025))
@@ -241,7 +257,8 @@ export default function App() {
           const { latitude, longitude, zoom, pitch, bearing } = vs as ViewState
           setViewState({ latitude, longitude, zoom, pitch, bearing })
         }}
-        controller={{ maxPitch: 85 }}
+        onClick={({ object }) => { if (!object) setSelectedId(undefined) }}
+        controller={{ maxPitch: 85, touchRotate: true }}
         layers={layers}
         deviceProps={{ type: 'webgl' }}
       >
