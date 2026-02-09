@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { FaGithub, FaSearch } from 'react-icons/fa'
-import { MdDarkMode, MdLightMode, MdExpandMore } from 'react-icons/md'
+import { MdDarkMode, MdLightMode, MdExpandLess, MdExpandMore } from 'react-icons/md'
 import { useHotkeysContext } from 'use-kbd'
 import { useTheme } from './ThemeContext'
 
@@ -23,6 +23,7 @@ const primaryStyle: React.CSSProperties = {
   width: 44,
   height: 44,
   fontSize: 20,
+  overflow: 'visible',
 }
 
 const secondaryStyle: React.CSSProperties = {
@@ -41,6 +42,7 @@ export default function MobileSpeedDial() {
   const didLongPress = useRef(false)
   const touchHandledRef = useRef(false)
   const primaryButtonRef = useRef<HTMLButtonElement>(null)
+  const expandedAtRef = useRef(0)
 
   const handlePrimaryTouchStart = useCallback((e: TouchEvent) => {
     e.preventDefault()
@@ -48,6 +50,7 @@ export default function MobileSpeedDial() {
     didLongPress.current = false
     longPressTimer.current = setTimeout(() => {
       didLongPress.current = true
+      expandedAtRef.current = Date.now()
       setIsExpanded(prev => !prev)
     }, LONG_PRESS_DURATION)
   }, [])
@@ -64,8 +67,7 @@ export default function MobileSpeedDial() {
       if (isExpanded) {
         setIsExpanded(false)
       } else {
-        // Defer to avoid ghost click on omnibar backdrop closing it immediately
-        setTimeout(() => ctx?.openOmnibar(), 0)
+        ctx?.openOmnibar()
       }
     }
   }, [ctx, isExpanded])
@@ -93,10 +95,12 @@ export default function MobileSpeedDial() {
     }
   }, [handlePrimaryTouchStart])
 
-  // Close on click outside
+  // Close on click outside, ignoring events shortly after expand (to avoid
+  // the touchend/ghost-click from the same long-press that opened the menu)
   useEffect(() => {
     if (!isExpanded) return
     const handleClickOutside = (e: MouseEvent | TouchEvent) => {
+      if (Date.now() - expandedAtRef.current < 500) return
       const target = e.target as HTMLElement
       if (!target.closest('.mobile-speed-dial')) {
         setIsExpanded(false)
@@ -137,7 +141,10 @@ export default function MobileSpeedDial() {
         onClick={handlePrimaryClick}
         aria-label={isExpanded ? 'Close menu' : 'Search (hold for more)'}
       >
-        {isExpanded ? <MdExpandMore /> : <FaSearch />}
+        {isExpanded ? <MdExpandMore /> : <>
+          <MdExpandLess style={{ position: 'absolute', top: -10, fontSize: 20, opacity: 0.7 }} />
+          <FaSearch />
+        </>}
       </button>
       {isExpanded && <>
         <a

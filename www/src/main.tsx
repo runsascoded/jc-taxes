@@ -8,7 +8,8 @@ import { ThemeProvider } from './ThemeContext'
 import ThemeToggle from './ThemeToggle'
 import MobileSpeedDial from './MobileSpeedDial'
 
-const isMobile = window.innerWidth <= 768
+const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+const isMobile = isTouchDevice || window.innerWidth <= 768
 
 function AppWithModals() {
   const { isModalOpen, closeModal } = useHotkeysContext()
