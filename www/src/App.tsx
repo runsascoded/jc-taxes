@@ -5,6 +5,7 @@ import { GeoJsonLayer } from '@deck.gl/layers'
 import type { Feature, Polygon, MultiPolygon } from 'geojson'
 import { useUrlState, intParam, stringParam } from 'use-prms'
 import type { Param } from 'use-prms'
+import { KbdModal, KbdOmnibar } from 'use-kbd'
 import { resolve as dvcResolve } from 'virtual:dvc-data'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { useKeyboardShortcuts, type ViewState } from './useKeyboardShortcuts'
@@ -136,12 +137,15 @@ export default function App() {
     return () => clearTimeout(timer)
   }, [viewState])
 
+  const { actualTheme, toggleTheme, colorStops, setColorStops, resetColorStops } = useTheme()
+
   // Keyboard shortcuts
   useKeyboardShortcuts({
     year, setYear,
     aggregateMode, setAggregateMode,
     settingsOpen, setSettingsOpen,
     setViewState,
+    toggleTheme,
   })
 
   // Omnibar search over parcels
@@ -185,7 +189,6 @@ export default function App() {
     return feature?.properties ?? null
   }, [selectedId, data, getFeatureId])
 
-  const { actualTheme, colorStops, setColorStops, resetColorStops } = useTheme()
   const mapStyle = actualTheme === 'dark'
     ? 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
     : 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
@@ -420,7 +423,11 @@ export default function App() {
         }}
       >
         {loading ? 'Loading...' : `${data?.length.toLocaleString()} parcels`}
-        <span style={{ marginLeft: 12, color: 'var(--text-secondary)' }}>Press <kbd style={{ background: 'var(--input-bg)', padding: '1px 5px', borderRadius: 3, fontSize: 11 }}>?</kbd> for shortcuts, <kbd style={{ background: 'var(--input-bg)', padding: '1px 5px', borderRadius: 3, fontSize: 11 }}>{navigator.platform.includes('Mac') ? '\u2318' : 'Ctrl+'}K</kbd> to search</span>
+        {window.innerWidth > 768 && (
+          <span style={{ marginLeft: 12, color: 'var(--text-secondary)' }}>
+            Press <KbdModal /> for shortcuts, <KbdOmnibar /> to search
+          </span>
+        )}
       </div>
     </div>
   )

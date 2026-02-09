@@ -23,15 +23,6 @@ html, body, #root {
   --input-bg: #f3f4f6;
   --input-border: #d1d5db;
   --shadow: rgba(0, 0, 0, 0.1);
-
-  --kbd-bg: var(--bg-secondary);
-  --kbd-bg-secondary: var(--bg-tertiary);
-  --kbd-text: var(--text-primary);
-  --kbd-text-secondary: var(--text-secondary);
-  --kbd-border: var(--border);
-  --kbd-kbd-bg: var(--bg-tertiary);
-  --kbd-kbd-border: var(--border);
-  --kbd-kbd-text: var(--text-primary);
 }
 
 [data-theme="dark"] {
@@ -46,4 +37,25 @@ html, body, #root {
   --input-bg: #333;
   --input-border: #555;
   --shadow: rgba(0, 0, 0, 0.3);
+}
+
+/* use-kbd theming: match specificity (0,3,0) of use-kbd's
+   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]):not(.light) }
+   Our stylesheet loads later (sheetIndex 2 vs 1), so same specificity = cascade wins */
+:root[data-theme="dark"]:not(.light) {
+  --kbd-bg: #1a1a1a;
+  --kbd-bg-secondary: #2d2d2d;
+  --kbd-text: #e0e0e0;
+  --kbd-text-secondary: #b0b0b0;
+  --kbd-border: #404040;
+  --kbd-accent: #4ecdc4;
+  --kbd-accent-hover: #4ecdc4;
+  --kbd-kbd-bg: #2d2d2d;
+  --kbd-kbd-border: #404040;
+  --kbd-kbd-text: #e0e0e0;
+}
+
+/* Omnibar doesn't inherit color from --kbd-text; set it explicitly */
+.kbd-omnibar {
+  color: var(--kbd-text);
 }
