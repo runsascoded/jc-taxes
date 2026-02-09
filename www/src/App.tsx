@@ -9,6 +9,7 @@ import { KbdModal, KbdOmnibar, useHotkeysContext } from 'use-kbd'
 import { resolve as dvcResolve } from 'virtual:dvc-data'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { useKeyboardShortcuts, type ViewState } from './useKeyboardShortcuts'
+import { useTouchPitch } from './useTouchPitch'
 import { useParcelSearch } from './useParcelSearch'
 import { useTheme } from './ThemeContext'
 import GradientEditor, {
@@ -118,6 +119,7 @@ export default function App() {
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [hovered, setHovered] = useState<ParcelProperties | null>(null)
   const suppressHoverRef = useRef(false)
+  const [webglError, setWebglError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useUrlState('sel', stringParam())
   const selectedIdRef = useRef(selectedId)
   selectedIdRef.current = selectedId
@@ -158,6 +160,9 @@ export default function App() {
     setViewState,
     toggleTheme,
   })
+
+  // Two-finger pitch gesture for mobile (deck.gl's built-in multipan is broken)
+  const isPitchingRef = useTouchPitch({ setViewState, maxPitch: 85 })
 
   // Omnibar search over parcels
   const onParcelSelect = useCallback((f: ParcelFeature) => {
@@ -273,6 +278,7 @@ export default function App() {
       <DeckGL
         viewState={viewState}
         onViewStateChange={({ viewState: vs }) => {
+          if (isPitchingRef.current) return
           const { latitude, longitude, zoom, pitch, bearing } = vs as ViewState
           setViewState({ latitude, longitude, zoom, pitch, bearing })
         }}
@@ -285,6 +291,10 @@ export default function App() {
             setTimeout(() => { suppressHoverRef.current = false }, 100)
           }
           if (window.innerWidth <= 768) setSettingsOpen(false)
+        }}
+        onError={(error: Error) => {
+          console.error('DeckGL error:', error)
+          setWebglError(error.message)
         }}
         controller={{ maxPitch: 85, touchRotate: true }}
         layers={layers}
@@ -429,6 +439,17 @@ export default function App() {
           </div>
         )
       })()}
+
+      {webglError && (
+        <div style={{
+          position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+          background: 'rgba(0,0,0,0.9)', color: '#ff6b6b', padding: '20px 30px',
+          borderRadius: 8, fontSize: 16, maxWidth: '80vw', zIndex: 9999, textAlign: 'center',
+        }}>
+          <div style={{ fontWeight: 'bold', marginBottom: 8 }}>WebGL Error</div>
+          <div style={{ fontSize: 14, color: '#ccc' }}>{webglError}</div>
+        </div>
+      )}
 
       {/* Status bar */}
       <div
