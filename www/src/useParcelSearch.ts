@@ -25,6 +25,17 @@ export function useParcelSearch({ data, onSelect }: Props) {
     (query: string, pagination: { offset: number; limit: number }) => {
       if (!data) return { entries: [], total: 0, hasMore: false }
 
+      const searchText = (f: ParcelFeature) => {
+        const p = f.properties
+        if (!p) return ''
+        return [
+          p.addr || '',
+          p.streets || '',
+          `${p.block || ''}-${p.lot || ''}${p.qual ? `-${p.qual}` : ''}`,
+          p.block || '',
+        ].join(' ').toLowerCase()
+      }
+
       let filtered: ParcelFeature[]
       if (!query.trim()) {
         // No query: show top parcels by $/sqft
@@ -32,22 +43,18 @@ export function useParcelSearch({ data, onSelect }: Props) {
           (a, b) => (b.properties?.paid_per_sqft ?? 0) - (a.properties?.paid_per_sqft ?? 0)
         )
       } else {
-        const q = query.toLowerCase()
+        const tokens = query.toLowerCase().split(/\s+/).filter(Boolean)
         filtered = data.filter((f) => {
-          const p = f.properties
-          if (!p) return false
-          const addr = (p.addr || '').toLowerCase()
-          const streets = (p.streets || '').toLowerCase()
-          const blq = `${p.block || ''}-${p.lot || ''}${p.qual ? `-${p.qual}` : ''}`.toLowerCase()
-          const blockOnly = (p.block || '').toLowerCase()
-          return addr.includes(q) || streets.includes(q) || blq.includes(q) || blockOnly === q
+          const text = searchText(f)
+          return tokens.every(t => text.includes(t))
         }).sort((a, b) => {
-          const aAddr = (a.properties?.addr || '').toLowerCase()
-          const bAddr = (b.properties?.addr || '').toLowerCase()
-          const aStarts = aAddr.startsWith(q)
-          const bStarts = bAddr.startsWith(q)
-          if (aStarts && !bStarts) return -1
-          if (!aStarts && bStarts) return 1
+          // Score by how many tokens prefix-match a word boundary
+          const text = (f: ParcelFeature) => searchText(f)
+          const words = (t: string) => t.split(/[\s/,.-]+/)
+          const prefixHits = (f: ParcelFeature) =>
+            tokens.reduce((s, t) => s + (words(text(f)).some(w => w.startsWith(t)) ? 1 : 0), 0)
+          const diff = prefixHits(b) - prefixHits(a)
+          if (diff !== 0) return diff
           return (b.properties?.paid_per_sqft ?? 0) - (a.properties?.paid_per_sqft ?? 0)
         })
       }
