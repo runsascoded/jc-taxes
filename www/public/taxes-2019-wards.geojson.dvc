@@ -1,5 +1,8 @@
 outs:
-- md5: 480bcd64aa3580d766523b1e329e63f2
-  size: 15142
+- md5: da4d1542ccc5a72ceb5049a8330578e4
+  size: 535799
   hash: md5
   path: taxes-2019-wards.geojson
+meta:
+  computation:
+    cmd: python -m jc_taxes.geojson_yearly -y 2019 -a ward -o www/public

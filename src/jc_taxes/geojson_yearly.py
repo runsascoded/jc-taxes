@@ -337,14 +337,17 @@ def generate_yearly_geojson(
                 "block": str(row.get("block", "")).strip(),
                 "lot": str(row.get("lot", "")).strip(),
                 "qual": clean_val(row.get("qual")),
-                "addr": addresses.get(addr_key),
-                "owner": owner,
                 "year": year,
                 "paid": round(paid, 2),
                 "billed": round(billed, 2),
                 "area_sqft": round(area_sqft, 1),
                 "paid_per_sqft": round(paid_per_sqft, 2),
             }
+            addr = addresses.get(addr_key)
+            if addr:
+                properties["addr"] = addr
+            if owner:
+                properties["owner"] = owner
             features.append({"type": "Feature", "geometry": geometry, "properties": properties})
     else:
         # Lot-level or block-level: dissolve geometries
@@ -393,15 +396,23 @@ def generate_yearly_geojson(
             properties = {
                 "block": block_num,
                 "lot": props["lot"],
-                "addr": addresses.get(addr_key),
-                "owner": lot_owners.get(key) if aggregate == "lot" else None,
-                "streets": block_streets.get(block_num) if aggregate == "block" else None,
                 "year": year,
                 "paid": round(paid, 2),
                 "billed": round(billed, 2),
                 "area_sqft": round(area_sqft, 1),
                 "paid_per_sqft": round(paid_per_sqft, 2),
             }
+            addr = addresses.get(addr_key)
+            if addr:
+                properties["addr"] = addr
+            if aggregate == "lot":
+                owner = lot_owners.get(key)
+                if owner:
+                    properties["owner"] = owner
+            if aggregate == "block":
+                streets = block_streets.get(block_num)
+                if streets:
+                    properties["streets"] = streets
             features.append({"type": "Feature", "geometry": geometry, "properties": properties})
 
     err(f"Generated {len(features)} features")
@@ -530,8 +541,9 @@ def _generate_census_geojson(
     cb_result["paid"] = cb_result["paid"].fillna(0)
     cb_result["billed"] = cb_result["billed"].fillna(0)
 
-    # Compute area as sum of lot intersection fragments (excludes parks, water, etc.)
-    cb_lot_area = overlay.groupby("GEOID")["intersection_area"].sum().reset_index()
+    # Compute area from tax-paying lots only (excludes parks, state land, water, etc.)
+    paying_overlay = overlay[overlay["paid"] > 0]
+    cb_lot_area = paying_overlay.groupby("GEOID")["intersection_area"].sum().reset_index()
     cb_lot_area = cb_lot_area.rename(columns={"intersection_area": "area_sqft"})
     cb_result = cb_result.merge(cb_lot_area, on="GEOID", how="left")
     cb_result["area_sqft"] = cb_result["area_sqft"].fillna(0)
@@ -543,15 +555,36 @@ def _generate_census_geojson(
         lambda r: r["paid"] / r["POP100"] if r["POP100"] > 0 else None, axis=1
     )
 
+    # Build trimmed geometries from tax-paying lot fragments
+    # Dissolve in projected CRS (NJSP) for accurate simplification, then convert to WGS84
+    err("Building trimmed geometries from tax-paying lots...")
+    paying_proj = paying_overlay.copy()  # already in EPSG:3424
+    cb_trimmed_proj = paying_proj.dissolve(by="GEOID").geometry
+    # Simplify: 5ft tolerance ≈ invisible at map zoom levels, big vertex reduction
+    cb_trimmed_proj = cb_trimmed_proj.simplify(5)
+    cb_trimmed = cb_trimmed_proj.to_crs("EPSG:4326") if hasattr(cb_trimmed_proj, 'to_crs') else gpd.GeoSeries(cb_trimmed_proj, crs="EPSG:3424").to_crs("EPSG:4326")
+    # Also build per-ward trimmed geometry
+    paying_proj_ward = paying_proj.copy()
+    paying_proj_ward["ward"] = paying_proj_ward["GEOID"].map(
+        cb_result.set_index("GEOID")["ward"]
+    )
+    ward_trimmed_proj = paying_proj_ward.dissolve(by="ward").geometry
+    ward_trimmed_proj = ward_trimmed_proj.simplify(5)
+    ward_trimmed = ward_trimmed_proj.to_crs("EPSG:4326") if hasattr(ward_trimmed_proj, 'to_crs') else gpd.GeoSeries(ward_trimmed_proj, crs="EPSG:3424").to_crs("EPSG:4326")
+
     if aggregate == "ward":
-        return _aggregate_to_wards(year, cb_result, output_dir)
+        return _aggregate_to_wards(year, cb_result, ward_trimmed, output_dir)
 
     # census-block output
     features = []
     for _, row in cb_result.iterrows():
-        geojson_geom = json.loads(shapely.to_geojson(row.geometry))
+        geoid = row["GEOID"]
+        geom = cb_trimmed.get(geoid, row.geometry)
+        if geom is None or geom.is_empty:
+            geom = row.geometry
+        geojson_geom = json.loads(shapely.to_geojson(geom))
         props = {
-            "geoid": row["GEOID"],
+            "geoid": geoid,
             "ward": row["ward"],
             "year": year,
             "paid": round(row["paid"], 2),
@@ -570,6 +603,7 @@ def _generate_census_geojson(
 def _aggregate_to_wards(
     year: int,
     cb_result: gpd.GeoDataFrame,
+    ward_trimmed: gpd.GeoSeries,
     output_dir: Path,
 ) -> dict:
     """Aggregate census-block results to ward level."""
@@ -597,9 +631,13 @@ def _aggregate_to_wards(
 
     features = []
     for _, row in ward_result.iterrows():
-        geojson_geom = json.loads(shapely.to_geojson(row.geometry))
+        ward = row["ward"]
+        geom = ward_trimmed.get(ward, row.geometry)
+        if geom is None or geom.is_empty:
+            geom = row.geometry
+        geojson_geom = json.loads(shapely.to_geojson(geom))
         props = {
-            "ward": row["ward"],
+            "ward": ward,
             "council_person": row["council_person"],
             "year": year,
             "paid": round(row["paid"], 2),

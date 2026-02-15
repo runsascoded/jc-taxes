@@ -1,5 +1,8 @@
 outs:
-- md5: c0280592c7a66032d776dce88f056084
-  size: 1216280
+- md5: 1928d736e5d5131c44bef8e9374a08ed
+  size: 1156687
   hash: md5
   path: taxes-2023-census-blocks.geojson
+meta:
+  computation:
+    cmd: python -m jc_taxes.geojson_yearly -y 2023 -a census-block -o www/public
