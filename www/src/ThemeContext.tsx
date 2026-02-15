@@ -17,6 +17,7 @@ interface ThemeContextType {
   actualTheme: 'light' | 'dark'
   toggleTheme: () => void
   colorStops: ColorStop[]
+  hasCustomStops: boolean
   setColorStops: (stops: ColorStop[]) => void
   resetColorStops: () => void
 }
@@ -72,7 +73,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [light, actualTheme, setThemeStops])
 
   return (
-    <ThemeContext.Provider value={{ actualTheme, toggleTheme, colorStops, setColorStops, resetColorStops }}>
+    <ThemeContext.Provider value={{ actualTheme, toggleTheme, colorStops, hasCustomStops: customStops !== null, setColorStops, resetColorStops }}>
       {children}
     </ThemeContext.Provider>
   )

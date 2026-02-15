@@ -14,6 +14,7 @@ type Props = {
   setScale: (scale: ScaleType) => void
   max: number
   onReset?: () => void
+  metricLabel?: string
 }
 
 // Convert value to position (0-1) based on scale
@@ -98,7 +99,7 @@ function hexToRgb(hex: string): [number, number, number] {
   ]
 }
 
-export default function GradientEditor({ stops, setStops, scale, setScale, max, onReset }: Props) {
+export default function GradientEditor({ stops, setStops, scale, setScale, max, onReset, metricLabel = '/sqft' }: Props) {
   const barRef = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState<number | null>(null)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
@@ -284,7 +285,7 @@ export default function GradientEditor({ stops, setStops, scale, setScale, max, 
             step={1}
             min={0}
           />
-          <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>/sqft</span>
+          <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>{metricLabel}</span>
           <button
             onClick={() => {
               removeStop(editingIndex)
@@ -306,7 +307,7 @@ export default function GradientEditor({ stops, setStops, scale, setScale, max, 
       {/* Labels */}
       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-secondary)' }}>
         <span>$0</span>
-        <span>${max}/sqft</span>
+        <span>${max}{metricLabel}</span>
       </div>
     </div>
   )

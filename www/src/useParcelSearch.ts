@@ -1,19 +1,6 @@
 import { useCallback } from 'react'
 import { useOmnibarEndpoint } from 'use-kbd'
-import type { Feature, Polygon, MultiPolygon } from 'geojson'
-
-type ParcelProperties = {
-  block?: string
-  lot?: string
-  qual?: string
-  addr?: string
-  streets?: string
-  paid?: number
-  paid_per_sqft?: number
-  area_sqft?: number
-}
-
-type ParcelFeature = Feature<Polygon | MultiPolygon, ParcelProperties>
+import type { ParcelProperties, ParcelFeature } from './types'
 
 type Props = {
   data: ParcelFeature[] | null
@@ -31,6 +18,9 @@ export function useParcelSearch({ data, onSelect }: Props) {
         return [
           p.addr || '',
           p.streets || '',
+          p.geoid || '',
+          p.ward ? `ward ${p.ward}` : '',
+          p.council_person || '',
           `${p.block || ''}-${p.lot || ''}${p.qual ? `-${p.qual}` : ''}`,
           p.block || '',
         ].join(' ').toLowerCase()
@@ -65,13 +55,11 @@ export function useParcelSearch({ data, onSelect }: Props) {
       return {
         entries: paginated.map((f) => {
           const p = f.properties!
-          const blq = `${p.block || ''}${p.lot ? `-${p.lot}` : ''}${p.qual ? `-${p.qual}` : ''}`
-          const label = p.addr || p.streets || `Block ${blq}`
-          const paid = p.paid ? `$${p.paid.toLocaleString()}` : ''
-          const perSqft = p.paid_per_sqft ? `$${p.paid_per_sqft.toFixed(2)}/sqft` : ''
-          const description = [blq, paid, perSqft].filter(Boolean).join(' · ')
+          const label = getLabel(p)
+          const description = getDescription(p)
+          const id = p.geoid || (p.ward && !p.block ? `ward-${p.ward}` : `${p.block || ''}-${p.lot || ''}${p.qual ? `-${p.qual}` : ''}`)
           return {
-            id: `parcel:${blq}`,
+            id: `parcel:${id}`,
             label,
             description,
             group: 'Parcels',
@@ -94,4 +82,29 @@ export function useParcelSearch({ data, onSelect }: Props) {
     minQueryLength: 0,
     enabled: !!data,
   })
+}
+
+function getLabel(p: ParcelProperties): string {
+  if (p.ward && !p.block) {
+    return `Ward ${p.ward}${p.council_person ? ` (${p.council_person})` : ''}`
+  }
+  if (p.geoid) return `Census Block ${p.geoid}`
+  const blq = `${p.block || ''}${p.lot ? `-${p.lot}` : ''}${p.qual ? `-${p.qual}` : ''}`
+  return p.addr || p.streets || `Block ${blq}`
+}
+
+function getDescription(p: ParcelProperties): string {
+  const parts: string[] = []
+  if (p.geoid && p.ward) parts.push(`Ward ${p.ward}`)
+  if (p.block) {
+    const blq = `${p.block}${p.lot ? `-${p.lot}` : ''}${p.qual ? `-${p.qual}` : ''}`
+    parts.push(blq)
+  }
+  if (p.population !== undefined) parts.push(`pop ${p.population.toLocaleString()}`)
+  if (p.paid) parts.push(`$${p.paid.toLocaleString()}`)
+  if (p.paid_per_sqft) parts.push(`$${p.paid_per_sqft.toFixed(2)}/sqft`)
+  if (p.paid_per_capita !== undefined && p.paid_per_capita !== null) {
+    parts.push(`$${p.paid_per_capita.toLocaleString()}/capita`)
+  }
+  return parts.filter(Boolean).join(' · ')
 }

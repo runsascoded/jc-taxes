@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Map } from 'react-map-gl/maplibre'
 import DeckGL from '@deck.gl/react'
 import { GeoJsonLayer } from '@deck.gl/layers'
-import type { Feature, Polygon, MultiPolygon } from 'geojson'
 import { useUrlState, intParam, stringParam } from 'use-prms'
 import type { Param } from 'use-prms'
 import { KbdModal, KbdOmnibar, useHotkeysContext } from 'use-kbd'
@@ -14,8 +13,10 @@ import { useParcelSearch } from './useParcelSearch'
 import { useTheme } from './ThemeContext'
 import GradientEditor, {
   type ScaleType,
+  type ColorStop,
   interpolateColor,
 } from './GradientEditor'
+import type { ParcelProperties, ParcelFeature } from './types'
 
 // Responsive default views: interpolated by viewport width
 const VIEW_BREAKPOINTS: { width: number, view: ViewState }[] = [
@@ -81,8 +82,64 @@ const viewParam: Param<ViewState> = {
 }
 
 const AVAILABLE_YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
-const AGGREGATE_MODES = ['lot', 'unit', 'block'] as const
+const AGGREGATE_MODES = ['block', 'lot', 'unit', 'census-block', 'ward'] as const
 type AggregateMode = typeof AGGREGATE_MODES[number]
+const SUFFIX_MAP: Record<string, string> = {
+  unit: '-units',
+  block: '-blocks',
+  lot: '-lots',
+  'census-block': '-census-blocks',
+  ward: '-wards',
+}
+type MetricMode = 'per_sqft' | 'per_capita'
+
+// Per-mode defaults for color max and height scale
+// hs calibrated so tallest bar ≈ 5000 deck.gl meters
+function getModeKey(agg: string, metric: string): string {
+  if (agg === 'census-block' || agg === 'ward') return `${agg}:${metric}`
+  return agg
+}
+// Per-mode color stops: values positioned to differentiate actual data distribution
+// per_sqft: data skewed near zero → stops at ~1-7% of max
+// per_capita: data more spread → stops at ~25-75% of max
+type ModeConfig = {
+  max: number
+  hs: number
+  stops?: { dark: ColorStop[], light: ColorStop[] }
+}
+const MODE_DEFAULTS: Record<string, ModeConfig> = {
+  'block':                  { max: 300,   hs: 15 },
+  'lot':                    { max: 300,   hs: 15 },
+  'unit':                   { max: 300,   hs: 15 },
+  'census-block:per_sqft':  { max: 20, hs: 100, stops: {
+    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 1.5, color: [255, 0, 0] }, { value: 12, color: [0, 255, 0] }],
+    light: [{ value: 0, color: [255, 255, 255] }, { value: 1.5, color: [255, 71, 71] }, { value: 12, color: [0, 214, 0] }],
+  }},
+  'census-block:per_capita':{ max: 15000, hs: 0.3, stops: {
+    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 3000, color: [255, 0, 0] }, { value: 10000, color: [0, 255, 0] }],
+    light: [{ value: 0, color: [255, 255, 255] }, { value: 3000, color: [255, 71, 71] }, { value: 10000, color: [0, 214, 0] }],
+  }},
+  'ward:per_sqft':          { max: 10, hs: 550, stops: {
+    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 2.5, color: [255, 0, 0] }, { value: 7, color: [0, 255, 0] }],
+    light: [{ value: 0, color: [255, 255, 255] }, { value: 2.5, color: [255, 71, 71] }, { value: 7, color: [0, 214, 0] }],
+  }},
+  'ward:per_capita':        { max: 9000, hs: 0.6, stops: {
+    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 2500, color: [255, 0, 0] }, { value: 7000, color: [0, 255, 0] }],
+    light: [{ value: 0, color: [255, 255, 255] }, { value: 2500, color: [255, 71, 71] }, { value: 7000, color: [0, 214, 0] }],
+  }},
+}
+const SS_PREFIX = 'jc-taxes:'
+
+function ssSave(key: string, max: number, hs: number) {
+  sessionStorage.setItem(`${SS_PREFIX}${key}:max`, String(max))
+  sessionStorage.setItem(`${SS_PREFIX}${key}:hs`, String(hs))
+}
+function ssLoad(key: string): { max: number, hs: number } | null {
+  const m = sessionStorage.getItem(`${SS_PREFIX}${key}:max`)
+  const h = sessionStorage.getItem(`${SS_PREFIX}${key}:hs`)
+  if (m == null || h == null) return null
+  return { max: Number(m), hs: Number(h) }
+}
 
 const HOVER_COLOR: [number, number, number, number] = [255, 255, 100, 220]
 const SELECTED_COLOR: [number, number, number, number] = [100, 200, 255, 230]
@@ -92,26 +149,14 @@ const scaleParam = (defaultVal: ScaleType) => ({
   encode: (v: ScaleType) => v,
 })
 
-// Height scale for 3D extrusion ($/sqft)
-function getElevation(perSqft: number, max: number, scale: number): number {
-  const capped = Math.min(perSqft, max)
-  return capped * scale
+const optNumParam: Param<number | undefined> = {
+  decode: (s: string | undefined) => {
+    if (s == null) return undefined
+    const n = Number(s)
+    return isNaN(n) ? undefined : n
+  },
+  encode: (v: number | undefined) => v == null ? undefined as unknown as string : String(v),
 }
-
-type ParcelProperties = {
-  block?: string
-  lot?: string
-  qual?: string
-  addr?: string
-  streets?: string
-  year?: number
-  paid?: number
-  billed?: number
-  area_sqft?: number
-  paid_per_sqft?: number
-}
-
-type ParcelFeature = Feature<Polygon | MultiPolygon, ParcelProperties>
 
 export default function App() {
   const kbdCtx = useHotkeysContext()
@@ -126,12 +171,76 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(() => window.innerWidth > 768)
 
-  // URL-persisted state
+  // URL-persisted state (max/hs are optional; absent = use mode defaults)
   const [year, setYear] = useUrlState('y', intParam(2025))
-  const [maxPerSqft, setMaxPerSqft] = useUrlState('max', intParam(300))
-  const [heightScale, setHeightScale] = useUrlState('hs', intParam(15))
-  const [aggregateMode, setAggregateMode] = useUrlState('agg', stringParam('block'))
+  const [maxValRaw, setMaxValRaw] = useUrlState('max', optNumParam)
+  const [heightScaleRaw, setHeightScaleRaw] = useUrlState('hs', optNumParam)
+  const [aggregateMode, setAggregateModeRaw] = useUrlState('agg', stringParam('block'))
   const [colorScale, setColorScale] = useUrlState('scale', scaleParam('log'))
+  const [metricMode, setMetricModeRaw] = useUrlState('metric', stringParam('per_sqft'))
+
+  const hasPopulation = aggregateMode === 'census-block' || aggregateMode === 'ward'
+  const modeKey = getModeKey(aggregateMode, metricMode)
+  const modeConf = MODE_DEFAULTS[modeKey] ?? MODE_DEFAULTS['block']
+
+  // Effective max/hs: URL value if explicitly set, else mode default
+  const maxVal = maxValRaw ?? modeConf.max
+  const heightScale = heightScaleRaw ?? modeConf.hs
+  // Setters: write to URL only when value differs from mode default
+  const setMaxVal = useCallback((v: number) => {
+    setMaxValRaw(v === modeConf.max ? undefined : v)
+  }, [modeConf.max, setMaxValRaw])
+  const setHeightScale = useCallback((v: number) => {
+    setHeightScaleRaw(v === modeConf.hs ? undefined : v)
+  }, [modeConf.hs, setHeightScaleRaw])
+
+  // Color stops: use custom (from URL `c`) → mode-specific → theme defaults
+  const { actualTheme, toggleTheme, colorStops: themeStops, hasCustomStops, setColorStops, resetColorStops: resetColorStopsRaw } = useTheme()
+  const modeStops = useMemo(() => {
+    if (modeConf.stops) return actualTheme === 'light' ? modeConf.stops.light : modeConf.stops.dark
+    return null
+  }, [modeConf, actualTheme])
+  const colorStops = hasCustomStops ? themeStops : (modeStops ?? themeStops)
+
+  // Reset: clear custom stops from URL; mode stops or theme defaults will apply
+  const resetColorStops = useCallback(() => {
+    resetColorStopsRaw()
+  }, [resetColorStopsRaw])
+
+  // Mode-aware switching: save customizations to SS, clear URL params for new mode
+  const switchToMode = useCallback((newAgg: string, newMetric: string) => {
+    // Save current customizations to SS (only if user changed from defaults)
+    if (maxValRaw != null || heightScaleRaw != null) {
+      const oldKey = getModeKey(aggregateMode, metricMode)
+      ssSave(oldKey, maxVal, heightScale)
+    }
+
+    // Reset metric to per_sqft for non-census modes
+    const effectiveMetric = (newAgg === 'census-block' || newAgg === 'ward') ? newMetric : 'per_sqft'
+    const newKey = getModeKey(newAgg, effectiveMetric)
+
+    // Restore from SS if user previously customized this mode, else clear (use defaults)
+    const saved = ssLoad(newKey)
+    setMaxValRaw(saved ? saved.max : undefined)
+    setHeightScaleRaw(saved ? saved.hs : undefined)
+
+    // Clear custom color stops; mode stops or theme defaults will apply
+    if (hasCustomStops) resetColorStopsRaw()
+  }, [aggregateMode, metricMode, maxVal, heightScale, maxValRaw, heightScaleRaw, hasCustomStops, resetColorStopsRaw])
+
+  const setAggregateMode = useCallback((newAgg: string) => {
+    const newMetric = (newAgg === 'census-block' || newAgg === 'ward') ? metricMode : 'per_sqft'
+    switchToMode(newAgg, newMetric)
+    setAggregateModeRaw(newAgg)
+    if (!(newAgg === 'census-block' || newAgg === 'ward') && metricMode === 'per_capita') {
+      setMetricModeRaw('per_sqft')
+    }
+  }, [switchToMode, metricMode])
+
+  const setMetricMode = useCallback((newMetric: string) => {
+    switchToMode(aggregateMode, newMetric)
+    setMetricModeRaw(newMetric)
+  }, [switchToMode, aggregateMode])
 
   // URL is source of truth for initial load; local state for smooth rendering
   const [urlView, setUrlView] = useUrlState('v', viewParam)
@@ -150,12 +259,11 @@ export default function App() {
     return () => clearTimeout(timer)
   }, [viewState])
 
-  const { actualTheme, toggleTheme, colorStops, setColorStops, resetColorStops } = useTheme()
-
   // Keyboard shortcuts
   useKeyboardShortcuts({
     year, setYear,
     aggregateMode, setAggregateMode,
+    hasPopulation, metricMode, setMetricMode,
     settingsOpen, setSettingsOpen,
     setViewState,
     toggleTheme,
@@ -181,7 +289,7 @@ export default function App() {
 
   useEffect(() => {
     setLoading(true)
-    const suffix = aggregateMode === 'unit' ? '-units' : aggregateMode === 'block' ? '-blocks' : '-lots'
+    const suffix = SUFFIX_MAP[aggregateMode] ?? '-lots'
     fetch(dvcResolve(`taxes-${year}${suffix}.geojson`))
       .then((r) => r.json())
       .then((geojson) => {
@@ -196,6 +304,8 @@ export default function App() {
 
   const getFeatureId = useCallback((f: ParcelFeature) => {
     const p = f.properties
+    if (p?.geoid) return p.geoid
+    if (p?.ward && !p?.block) return `ward-${p.ward}`
     return `${p?.block || ''}-${p?.lot || ''}-${p?.qual || ''}`.replace(/-+$/, '')
   }, [])
 
@@ -214,14 +324,19 @@ export default function App() {
     ? [100, 100, 100, 100]
     : [60, 60, 60, 160]
 
+  const getMetricValue = useCallback((f: ParcelFeature): number => {
+    const p = f.properties
+    if (metricMode === 'per_capita') return p?.paid_per_capita ?? 0
+    return p?.paid_per_sqft ?? 0
+  }, [metricMode])
+
   const getFillColor = useCallback((f: ParcelFeature): [number, number, number, number] => {
     const id = getFeatureId(f)
     if (id === selectedId) return SELECTED_COLOR
     if (id === hoveredId) return HOVER_COLOR
 
-    const perSqft = f.properties?.paid_per_sqft ?? 0
-    return interpolateColor(perSqft, colorStops, maxPerSqft, colorScale, fillAlpha)
-  }, [colorStops, colorScale, maxPerSqft, hoveredId, selectedId, getFeatureId, fillAlpha])
+    return interpolateColor(getMetricValue(f), colorStops, maxVal, colorScale, fillAlpha)
+  }, [colorStops, colorScale, maxVal, hoveredId, selectedId, getFeatureId, fillAlpha, getMetricValue])
 
   const layers = [
     new GeoJsonLayer<ParcelFeature>({
@@ -231,7 +346,7 @@ export default function App() {
       extruded: true,
       wireframe: true,
       getFillColor,
-      getElevation: (f) => getElevation(f.properties?.paid_per_sqft ?? 0, maxPerSqft, heightScale),
+      getElevation: (f) => getMetricValue(f) * heightScale,
       getLineColor: lineColor,
       lineWidthMinPixels: 1,
       pickable: true,
@@ -257,8 +372,8 @@ export default function App() {
         }
       },
       updateTriggers: {
-        getFillColor: [year, maxPerSqft, colorStops, colorScale, hoveredId, selectedId, aggregateMode, actualTheme],
-        getElevation: [year, maxPerSqft, heightScale, aggregateMode],
+        getFillColor: [year, maxVal, colorStops, colorScale, hoveredId, selectedId, aggregateMode, actualTheme, metricMode],
+        getElevation: [year, heightScale, aggregateMode, metricMode],
         getLineColor: [actualTheme],
       },
     }),
@@ -350,12 +465,12 @@ export default function App() {
               </select>
             </label>
             <label>
-              Max $/sqft:{' '}
+              Max ${metricMode === 'per_capita' ? '/capita' : '/sqft'}:{' '}
               <input
                 type="number"
-                value={maxPerSqft}
-                onChange={(e) => setMaxPerSqft(Number(e.target.value) || 100)}
-                style={{ ...inputStyle, width: 70 }}
+                value={maxVal}
+                onChange={(e) => setMaxVal(Number(e.target.value) || 100)}
+                style={{ ...inputStyle, width: 80 }}
               />
             </label>
             <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 4 }}>
@@ -365,8 +480,9 @@ export default function App() {
                 setStops={setColorStops}
                 scale={colorScale}
                 setScale={setColorScale}
-                max={maxPerSqft}
+                max={maxVal}
                 onReset={resetColorStops}
+                metricLabel={metricMode === 'per_capita' ? '/capita' : '/sqft'}
               />
             </div>
             <label>
@@ -376,20 +492,35 @@ export default function App() {
                 onChange={(e) => setAggregateMode(e.target.value as AggregateMode)}
                 style={inputStyle}
               >
+                <option value="ward">Wards</option>
+                <option value="census-block">Census Blocks</option>
                 <option value="block">Blocks</option>
                 <option value="lot">Lots (dissolved)</option>
                 <option value="unit">Units (individual)</option>
               </select>
             </label>
+            {hasPopulation && (
+              <label>
+                Metric:{' '}
+                <select
+                  value={metricMode}
+                  onChange={(e) => setMetricMode(e.target.value as MetricMode)}
+                  style={inputStyle}
+                >
+                  <option value="per_sqft">$/sqft</option>
+                  <option value="per_capita">$/capita</option>
+                </select>
+              </label>
+            )}
             <label>
               Height scale:{' '}
               <input
                 type="number"
                 value={heightScale}
-                onChange={(e) => setHeightScale(Number(e.target.value) || 15)}
-                style={{ ...inputStyle, width: 60 }}
-                min={1}
-                step={5}
+                onChange={(e) => setHeightScale(Number(e.target.value) || 1)}
+                style={{ ...inputStyle, width: 70 }}
+                min={0.01}
+                step={heightScale < 1 ? 0.1 : heightScale < 10 ? 1 : 5}
               />
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -410,6 +541,8 @@ export default function App() {
       {/* Hover/selected tooltip */}
       {(hovered || selected) && (() => {
         const info = hovered ?? selected!
+        const isCensus = !!info.geoid || (!!info.ward && !info.block)
+        const sqftActive = metricMode === 'per_sqft'
         return (
           <div
             style={{
@@ -424,9 +557,26 @@ export default function App() {
               maxWidth: 300,
             }}
           >
-            {info.addr && <div><strong>{info.addr}</strong></div>}
-            {info.streets && !info.addr && <div><strong>{info.streets}</strong></div>}
-            <div>Block{info.lot ? ': ' : ' '}{info.block}{info.lot ? `-${info.lot}` : ''}{info.qual ? `-${info.qual}` : ''}</div>
+            {isCensus ? (
+              <>
+                {info.ward && !info.block && (
+                  <div><strong>Ward {info.ward}{info.council_person ? ` (${info.council_person})` : ''}</strong></div>
+                )}
+                {info.geoid && (
+                  <div><strong>Census Block {info.geoid}</strong></div>
+                )}
+                {info.geoid && info.ward && <div>Ward {info.ward}</div>}
+                {info.population !== undefined && (
+                  <div>Population: {info.population.toLocaleString()}</div>
+                )}
+              </>
+            ) : (
+              <>
+                {info.addr && <div><strong>{info.addr}</strong></div>}
+                {info.streets && !info.addr && <div><strong>{info.streets}</strong></div>}
+                <div>Block{info.lot ? ': ' : ' '}{info.block}{info.lot ? `-${info.lot}` : ''}{info.qual ? `-${info.qual}` : ''}</div>
+              </>
+            )}
             {info.area_sqft !== undefined && info.area_sqft > 0 && (
               <div>Area: {info.area_sqft.toLocaleString()} sqft</div>
             )}
@@ -434,7 +584,14 @@ export default function App() {
               <div>Paid ({year}): ${info.paid.toLocaleString()}</div>
             )}
             {info.paid_per_sqft !== undefined && info.paid_per_sqft > 0 && (
-              <div style={{ color: 'var(--text-accent)' }}>${info.paid_per_sqft.toFixed(2)}/sqft</div>
+              <div style={{ color: sqftActive ? 'var(--text-accent)' : undefined }}>
+                ${info.paid_per_sqft.toFixed(2)}/sqft
+              </div>
+            )}
+            {info.paid_per_capita !== undefined && info.paid_per_capita > 0 && (
+              <div style={{ color: !sqftActive ? 'var(--text-accent)' : undefined }}>
+                ${info.paid_per_capita.toLocaleString()}/capita
+              </div>
             )}
           </div>
         )

@@ -16,6 +16,9 @@ type Props = {
   setYear: (y: number) => void
   aggregateMode: string
   setAggregateMode: (m: string) => void
+  hasPopulation: boolean
+  metricMode: string
+  setMetricMode: (m: string) => void
   settingsOpen: boolean
   setSettingsOpen: (v: boolean | ((v: boolean) => boolean)) => void
   setViewState: Dispatch<SetStateAction<ViewState>>
@@ -27,6 +30,9 @@ export function useKeyboardShortcuts({
   setYear,
   aggregateMode,
   setAggregateMode,
+  hasPopulation,
+  metricMode,
+  setMetricMode,
   settingsOpen,
   setSettingsOpen,
   setViewState,
@@ -94,6 +100,28 @@ export function useKeyboardShortcuts({
     group: 'UI',
     defaultBindings: ['f'],
     handler: () => setViewState(v => ({ ...v, pitch: 0 })),
+  })
+
+  useAction('view:census-blocks', {
+    label: 'Census block view',
+    group: 'Navigation',
+    defaultBindings: ['c'],
+    handler: () => setAggregateMode('census-block'),
+  })
+
+  useAction('view:wards', {
+    label: 'Ward view',
+    group: 'Navigation',
+    defaultBindings: ['w'],
+    handler: () => setAggregateMode('ward'),
+  })
+
+  useAction('metric:toggle', {
+    label: 'Toggle metric ($/sqft ↔ $/capita)',
+    group: 'Navigation',
+    defaultBindings: ['m'],
+    enabled: hasPopulation,
+    handler: () => setMetricMode(metricMode === 'per_sqft' ? 'per_capita' : 'per_sqft'),
   })
 
   useAction('view:3d', {

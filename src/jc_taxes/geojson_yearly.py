@@ -5,6 +5,7 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
+import geopandas as gpd
 import pandas as pd
 import shapely
 import shapely.wkb
@@ -12,6 +13,7 @@ import shapely.ops
 from pyproj import Transformer
 from utz import err
 
+from .census import load_jc_census_blocks, load_jc_wards
 from .paths import CACHE, DATA, PARCELS, PARCELS_COMBINED
 
 # Transformers for different CRS scenarios
@@ -92,10 +94,20 @@ def summarize_block_streets(addresses: dict[str, str]) -> dict[str, str]:
     return summaries
 
 
+AGGREGATE_CHOICES = ["block", "census-block", "lot", "unit", "ward"]
+SUFFIX_MAP = {
+    "unit": "-units",
+    "block": "-blocks",
+    "lot": "-lots",
+    "census-block": "-census-blocks",
+    "ward": "-wards",
+}
+
+
 def generate_yearly_geojson(
     year: int,
     output_dir: Path | None = None,
-    aggregate: str = "lot",  # "block", "lot", or "unit"
+    aggregate: str = "lot",
 ) -> dict:
     """
     Generate GeoJSON for a specific tax year showing payments.
@@ -103,9 +115,7 @@ def generate_yearly_geojson(
     Args:
         year: Tax year to visualize
         output_dir: Output directory (default: www/public/)
-        aggregate: "block" = dissolve by block,
-                   "lot" = dissolve condo units into lots,
-                   "unit" = show individual units with their payments
+        aggregate: "block", "census-block", "lot", "unit", or "ward"
 
     Returns:
         GeoJSON FeatureCollection dict
@@ -137,6 +147,16 @@ def generate_yearly_geojson(
 
     # Build block-level street summaries
     block_streets = summarize_block_streets(addresses)
+
+    # Census-block and ward aggregation: area-weighted lot → census block allocation
+    if aggregate in ("census-block", "ward"):
+        return _generate_census_geojson(
+            year=year,
+            aggregate=aggregate,
+            parcels=parcels,
+            payments=payments,
+            output_dir=output_dir,
+        )
 
     # Create join keys based on aggregation level
     if aggregate == "unit":
@@ -318,7 +338,7 @@ def generate_yearly_geojson(
         "features": features,
     }
 
-    suffix = {"unit": "-units", "block": "-blocks", "lot": "-lots"}.get(aggregate, "-lots")
+    suffix = SUFFIX_MAP.get(aggregate, "-lots")
     output = output_dir / f"taxes-{year}{suffix}.geojson"
     with open(output, "w") as f:
         json.dump(geojson, f)
@@ -327,11 +347,199 @@ def generate_yearly_geojson(
     return geojson
 
 
+def _build_lot_gdf(parcels: pd.DataFrame, payments: pd.DataFrame) -> gpd.GeoDataFrame:
+    """Build lot-level GeoDataFrame in WGS84 with aggregated payments.
+
+    Dissolves condo units into lots, converts all geometries to WGS84.
+    Returns GeoDataFrame with columns: join_key, paid, billed, geometry (WGS84)
+    """
+    # Lot-level join key
+    parcels = parcels.copy()
+    parcels["join_key"] = parcels["block"].str.strip() + "-" + parcels["lot"].str.strip()
+    payments = payments.copy()
+    payments["join_key"] = payments["Block"].str.strip() + "-" + payments["Lot"].str.strip()
+
+    pay_agg = payments.groupby("join_key").agg({"Billed": "sum", "Paid": "sum"}).reset_index()
+    pay_dict = pay_agg.set_index("join_key").to_dict("index")
+
+    # Collect geometries per lot, dissolve, convert to WGS84
+    lot_geoms: dict[str, list] = defaultdict(list)
+    for _, row in parcels.iterrows():
+        geom = None
+        g = row.get("geometry")
+        if g is not None and not pd.isna(g):
+            if isinstance(g, bytes):
+                geom = shapely.wkb.loads(g)
+            elif hasattr(g, "geom_type"):
+                geom = g
+        if geom is None:
+            geo_shape = row.get("geo_shape")
+            if geo_shape is not None and not pd.isna(geo_shape):
+                if isinstance(geo_shape, bytes):
+                    geom = shapely.wkb.loads(geo_shape)
+                elif isinstance(geo_shape, str):
+                    geom = shapely.geometry.shape(json.loads(geo_shape))
+        if geom is not None:
+            lot_geoms[row["join_key"]].append(geom)
+
+    rows = []
+    for key, geoms in lot_geoms.items():
+        try:
+            dissolved = geoms[0] if len(geoms) == 1 else shapely.ops.unary_union(geoms)
+            # Convert NJSP → WGS84 if needed
+            if dissolved.bounds[0] > 1000:
+                dissolved = shapely.ops.transform(njsp_to_wgs84.transform, dissolved)
+            pay = pay_dict.get(key, {})
+            rows.append({
+                "join_key": key,
+                "paid": float(pay.get("Paid", 0) or 0),
+                "billed": float(pay.get("Billed", 0) or 0),
+                "geometry": dissolved,
+            })
+        except Exception:
+            continue
+
+    gdf = gpd.GeoDataFrame(rows, crs="EPSG:4326")
+    err(f"Built {len(gdf)} lot geometries in WGS84")
+    return gdf
+
+
+def _generate_census_geojson(
+    year: int,
+    aggregate: str,
+    parcels: pd.DataFrame,
+    payments: pd.DataFrame,
+    output_dir: Path,
+) -> dict:
+    """Generate census-block or ward level GeoJSON via area-weighted allocation."""
+    lot_gdf = _build_lot_gdf(parcels, payments)
+    cb_gdf = load_jc_census_blocks()
+
+    # Project to NJSP for accurate area computation
+    lot_proj = lot_gdf.to_crs("EPSG:3424")
+    cb_proj = cb_gdf.to_crs("EPSG:3424")
+
+    lot_proj["lot_area"] = lot_proj.geometry.area
+
+    err("Computing lot × census-block overlay...")
+    overlay = gpd.overlay(lot_proj, cb_proj, how="intersection")
+    overlay["intersection_area"] = overlay.geometry.area
+    overlay["weight"] = overlay["intersection_area"] / overlay["lot_area"]
+    overlay["w_paid"] = overlay["paid"] * overlay["weight"]
+    overlay["w_billed"] = overlay["billed"] * overlay["weight"]
+
+    err(f"  {len(overlay)} intersection fragments from {len(lot_proj)} lots × {len(cb_proj)} census blocks")
+
+    # Aggregate to census-block level
+    cb_agg = overlay.groupby("GEOID").agg({
+        "w_paid": "sum",
+        "w_billed": "sum",
+    }).rename(columns={"w_paid": "paid", "w_billed": "billed"})
+
+    # Merge back census block attributes and geometry (WGS84)
+    cb_result = cb_gdf.set_index("GEOID").join(cb_agg, how="left").reset_index()
+    cb_result["paid"] = cb_result["paid"].fillna(0)
+    cb_result["billed"] = cb_result["billed"].fillna(0)
+
+    # Compute area in sqft (project to NJSP)
+    cb_result_proj = cb_result.set_geometry("geometry").to_crs("EPSG:3424")
+    cb_result["area_sqft"] = cb_result_proj.geometry.area
+
+    cb_result["paid_per_sqft"] = cb_result.apply(
+        lambda r: r["paid"] / r["area_sqft"] if r["area_sqft"] > 0 else 0, axis=1
+    )
+    cb_result["paid_per_capita"] = cb_result.apply(
+        lambda r: r["paid"] / r["POP100"] if r["POP100"] > 0 else None, axis=1
+    )
+
+    if aggregate == "ward":
+        return _aggregate_to_wards(year, cb_result, output_dir)
+
+    # census-block output
+    features = []
+    for _, row in cb_result.iterrows():
+        geojson_geom = json.loads(shapely.to_geojson(row.geometry))
+        props = {
+            "geoid": row["GEOID"],
+            "ward": row["ward"],
+            "year": year,
+            "paid": round(row["paid"], 2),
+            "billed": round(row["billed"], 2),
+            "area_sqft": round(row["area_sqft"], 1),
+            "paid_per_sqft": round(row["paid_per_sqft"], 2),
+            "population": int(row["POP100"]),
+            "paid_per_capita": round(row["paid_per_capita"], 2) if pd.notna(row["paid_per_capita"]) else None,
+        }
+        features.append({"type": "Feature", "geometry": geojson_geom, "properties": props})
+
+    err(f"Generated {len(features)} census-block features")
+    return _write_geojson(features, year, "census-block", output_dir)
+
+
+def _aggregate_to_wards(
+    year: int,
+    cb_result: gpd.GeoDataFrame,
+    output_dir: Path,
+) -> dict:
+    """Aggregate census-block results to ward level."""
+    wards_gdf = load_jc_wards()
+
+    ward_agg = cb_result.groupby("ward").agg({
+        "paid": "sum",
+        "billed": "sum",
+        "POP100": "sum",
+        "area_sqft": "sum",
+    }).rename(columns={"POP100": "population"})
+
+    ward_result = wards_gdf.set_index("ward").join(ward_agg, how="left").reset_index()
+    ward_result["paid"] = ward_result["paid"].fillna(0)
+    ward_result["billed"] = ward_result["billed"].fillna(0)
+    ward_result["population"] = ward_result["population"].fillna(0).astype(int)
+    ward_result["area_sqft"] = ward_result["area_sqft"].fillna(0)
+
+    ward_result["paid_per_sqft"] = ward_result.apply(
+        lambda r: r["paid"] / r["area_sqft"] if r["area_sqft"] > 0 else 0, axis=1
+    )
+    ward_result["paid_per_capita"] = ward_result.apply(
+        lambda r: r["paid"] / r["population"] if r["population"] > 0 else None, axis=1
+    )
+
+    features = []
+    for _, row in ward_result.iterrows():
+        geojson_geom = json.loads(shapely.to_geojson(row.geometry))
+        props = {
+            "ward": row["ward"],
+            "council_person": row["council_person"],
+            "year": year,
+            "paid": round(row["paid"], 2),
+            "billed": round(row["billed"], 2),
+            "area_sqft": round(row["area_sqft"], 1),
+            "paid_per_sqft": round(row["paid_per_sqft"], 2),
+            "population": int(row["population"]),
+            "paid_per_capita": round(row["paid_per_capita"], 2) if pd.notna(row["paid_per_capita"]) else None,
+        }
+        features.append({"type": "Feature", "geometry": geojson_geom, "properties": props})
+
+    err(f"Generated {len(features)} ward features")
+    return _write_geojson(features, year, "ward", output_dir)
+
+
+def _write_geojson(features: list, year: int, aggregate: str, output_dir: Path) -> dict:
+    """Write GeoJSON FeatureCollection to disk."""
+    geojson = {"type": "FeatureCollection", "features": features}
+    suffix = SUFFIX_MAP.get(aggregate, "-lots")
+    output = output_dir / f"taxes-{year}{suffix}.geojson"
+    with open(output, "w") as f:
+        json.dump(geojson, f)
+    err(f"Wrote {output} ({output.stat().st_size / 1024 / 1024:.1f} MB)")
+    return geojson
+
+
 if __name__ == "__main__":
     import click
 
     @click.command()
-    @click.option("-a", "--aggregate", default="lot", type=click.Choice(["block", "lot", "unit"]), help="Aggregation level")
+    @click.option("-a", "--aggregate", default="lot", type=click.Choice(AGGREGATE_CHOICES), help="Aggregation level")
     @click.option("-o", "--output-dir", type=Path, help="Output directory")
     @click.option("-y", "--year", default=2024, help="Tax year")
     def main(aggregate: str, output_dir: Path | None, year: int):
