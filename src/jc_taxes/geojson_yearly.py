@@ -21,6 +21,48 @@ wgs84_to_njsp = Transformer.from_crs("EPSG:4326", "EPSG:3424", always_xy=True)
 njsp_to_wgs84 = Transformer.from_crs("EPSG:3424", "EPSG:4326", always_xy=True)
 
 
+def load_owners(cache_dir: Path = CACHE) -> tuple[dict[str, str], dict[str, str]]:
+    """Load property owners from cached account JSON files.
+
+    Returns:
+        (lot_owners, unit_owners) where:
+        - lot_owners: "block-lot" → owner name (from base record, i.e. no qualifier;
+          this is the building owner or HOA for condos)
+        - unit_owners: "block-lot-qual" → owner name (individual unit owners)
+    """
+    lot_owners: dict[str, str] = {}
+    unit_owners: dict[str, str] = {}
+    json_files = list(cache_dir.glob("*.json"))
+    for path in json_files:
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            acct = data.get("accountInquiryVM", {})
+            block = str(acct.get("Block", "")).strip()
+            lot = str(acct.get("Lot", "")).strip()
+            qual = str(acct.get("Qualifier", "")).strip()
+            owner = str(acct.get("OwnerName", "")).strip()
+            if not (block and lot and owner):
+                continue
+            lot_key = f"{block}-{lot}"
+            if not qual:
+                # Base record: building-level owner or HOA
+                lot_owners[lot_key] = owner
+            else:
+                unit_key = f"{block}-{lot}-{qual}"
+                unit_owners[unit_key] = owner
+                # Also set lot owner if no base record exists and all units share owner
+                if lot_key not in lot_owners:
+                    lot_owners[lot_key] = owner
+                elif lot_owners[lot_key] != owner:
+                    # Multiple different owners → mark as multi-owner (condo)
+                    # Keep the first one (base record will overwrite if it exists)
+                    pass
+        except Exception:
+            continue
+    return lot_owners, unit_owners
+
+
 def load_addresses(cache_dir: Path = CACHE) -> dict[str, str]:
     """Load property addresses from cached account JSON files.
 
@@ -94,6 +136,13 @@ def summarize_block_streets(addresses: dict[str, str]) -> dict[str, str]:
     return summaries
 
 
+# Known omnibus payments: qualifier-X payments that cover multiple adjacent lots.
+# Block 18702 Lot 29 (Qual X, "106 Harmon St") is a single payment for the
+# Salem Lafayette urban renewal complex spanning lots 27, 28, 29.
+OMNIBUS_LOT_GROUPS = [
+    {"source": "18702-29", "lots": ["18702-27", "18702-28", "18702-29"]},
+]
+
 AGGREGATE_CHOICES = ["block", "census-block", "lot", "unit", "ward"]
 SUFFIX_MAP = {
     "unit": "-units",
@@ -140,10 +189,11 @@ def generate_yearly_geojson(
     payments = payments[payments["Year"] == year]
     err(f"  {len(payments):,} payment records for {year}")
 
-    # Load addresses from cached accounts
-    err("Loading addresses from cache...")
+    # Load addresses and owners from cached accounts
+    err("Loading addresses and owners from cache...")
     addresses = load_addresses()
-    err(f"  {len(addresses):,} addresses loaded")
+    lot_owners, unit_owners = load_owners()
+    err(f"  {len(addresses):,} addresses, {len(lot_owners):,} lot owners, {len(unit_owners):,} unit owners loaded")
 
     # Build block-level street summaries
     block_streets = summarize_block_streets(addresses)
@@ -190,6 +240,25 @@ def generate_yearly_geojson(
         "Paid": "sum",
     }).reset_index()
     pay_dict = pay_agg.set_index("join_key").to_dict("index")
+
+    # Redistribute omnibus payments across their lot groups
+    if aggregate == "lot":
+        for group in OMNIBUS_LOT_GROUPS:
+            src = group["source"]
+            if src not in pay_dict:
+                continue
+            paid = pay_dict[src]["Paid"]
+            billed = pay_dict[src]["Billed"]
+            lots = group["lots"]
+            n = len(lots)
+            for key in lots:
+                if key not in pay_dict:
+                    pay_dict[key] = {"Paid": 0.0, "Billed": 0.0}
+            # Split evenly (lots are similar size)
+            for key in lots:
+                pay_dict[key]["Paid"] = paid / n
+                pay_dict[key]["Billed"] = billed / n
+            err(f"  Redistributed {src} (${paid:,.0f}) across {n} lots: {lots}")
 
     def clean_val(v):
         return None if pd.isna(v) else v
@@ -262,11 +331,14 @@ def generate_yearly_geojson(
             billed = float(pay_data.get("Billed", 0) or 0)
             paid_per_sqft = paid / area_sqft if area_sqft > 0 else 0.0
 
+            qual_str = str(row.get("qual", "")).strip() if pd.notna(row.get("qual")) else ""
+            owner = unit_owners.get(key) if qual_str else lot_owners.get(addr_key)
             properties = {
                 "block": str(row.get("block", "")).strip(),
                 "lot": str(row.get("lot", "")).strip(),
                 "qual": clean_val(row.get("qual")),
                 "addr": addresses.get(addr_key),
+                "owner": owner,
                 "year": year,
                 "paid": round(paid, 2),
                 "billed": round(billed, 2),
@@ -322,6 +394,7 @@ def generate_yearly_geojson(
                 "block": block_num,
                 "lot": props["lot"],
                 "addr": addresses.get(addr_key),
+                "owner": lot_owners.get(key) if aggregate == "lot" else None,
                 "streets": block_streets.get(block_num) if aggregate == "block" else None,
                 "year": year,
                 "paid": round(paid, 2),
@@ -361,6 +434,22 @@ def _build_lot_gdf(parcels: pd.DataFrame, payments: pd.DataFrame) -> gpd.GeoData
 
     pay_agg = payments.groupby("join_key").agg({"Billed": "sum", "Paid": "sum"}).reset_index()
     pay_dict = pay_agg.set_index("join_key").to_dict("index")
+
+    # Redistribute omnibus payments across their lot groups
+    for group in OMNIBUS_LOT_GROUPS:
+        src = group["source"]
+        if src not in pay_dict:
+            continue
+        paid = pay_dict[src]["Paid"]
+        billed = pay_dict[src]["Billed"]
+        lots = group["lots"]
+        n = len(lots)
+        for key in lots:
+            if key not in pay_dict:
+                pay_dict[key] = {"Paid": 0.0, "Billed": 0.0}
+        for key in lots:
+            pay_dict[key]["Paid"] = paid / n
+            pay_dict[key]["Billed"] = billed / n
 
     # Collect geometries per lot, dissolve, convert to WGS84
     lot_geoms: dict[str, list] = defaultdict(list)
@@ -441,9 +530,11 @@ def _generate_census_geojson(
     cb_result["paid"] = cb_result["paid"].fillna(0)
     cb_result["billed"] = cb_result["billed"].fillna(0)
 
-    # Compute area in sqft (project to NJSP)
-    cb_result_proj = cb_result.set_geometry("geometry").to_crs("EPSG:3424")
-    cb_result["area_sqft"] = cb_result_proj.geometry.area
+    # Compute area as sum of lot intersection fragments (excludes parks, water, etc.)
+    cb_lot_area = overlay.groupby("GEOID")["intersection_area"].sum().reset_index()
+    cb_lot_area = cb_lot_area.rename(columns={"intersection_area": "area_sqft"})
+    cb_result = cb_result.merge(cb_lot_area, on="GEOID", how="left")
+    cb_result["area_sqft"] = cb_result["area_sqft"].fillna(0)
 
     cb_result["paid_per_sqft"] = cb_result.apply(
         lambda r: r["paid"] / r["area_sqft"] if r["area_sqft"] > 0 else 0, axis=1

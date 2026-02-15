@@ -1,0 +1,5 @@
+outs:
+- md5: 786c258fd1d413a90031cd662f0d8205
+  size: 1215497
+  hash: md5
+  path: taxes-2018-census-blocks.geojson

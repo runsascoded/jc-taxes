@@ -1,0 +1,5 @@
+outs:
+- md5: 480bcd64aa3580d766523b1e329e63f2
+  size: 15142
+  hash: md5
+  path: taxes-2019-wards.geojson

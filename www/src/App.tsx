@@ -93,8 +93,7 @@ const SUFFIX_MAP: Record<string, string> = {
 }
 type MetricMode = 'per_sqft' | 'per_capita'
 
-// Per-mode defaults for color max and height scale
-// hs calibrated so tallest bar ≈ 5000 deck.gl meters
+// Per-mode defaults for color max and max height (meters)
 function getModeKey(agg: string, metric: string): string {
   if (agg === 'census-block' || agg === 'ward') return `${agg}:${metric}`
   return agg
@@ -104,41 +103,39 @@ function getModeKey(agg: string, metric: string): string {
 // per_capita: data more spread → stops at ~25-75% of max
 type ModeConfig = {
   max: number
-  hs: number
+  maxHeight: number
   stops?: { dark: ColorStop[], light: ColorStop[] }
 }
 const MODE_DEFAULTS: Record<string, ModeConfig> = {
-  'block':                  { max: 300,   hs: 15 },
-  'lot':                    { max: 300,   hs: 15 },
-  'unit':                   { max: 300,   hs: 15 },
-  'census-block:per_sqft':  { max: 20, hs: 100, stops: {
+  'block':                  { max: 300,   maxHeight: 4500 },
+  'lot':                    { max: 300,   maxHeight: 4500 },
+  'unit':                   { max: 300,   maxHeight: 4500 },
+  'census-block:per_sqft':  { max: 20, maxHeight: 2000, stops: {
     dark:  [{ value: 0, color: [96, 96, 96] }, { value: 1.5, color: [255, 0, 0] }, { value: 12, color: [0, 255, 0] }],
     light: [{ value: 0, color: [255, 255, 255] }, { value: 1.5, color: [255, 71, 71] }, { value: 12, color: [0, 214, 0] }],
   }},
-  'census-block:per_capita':{ max: 15000, hs: 0.3, stops: {
+  'census-block:per_capita':{ max: 15000, maxHeight: 4500, stops: {
     dark:  [{ value: 0, color: [96, 96, 96] }, { value: 3000, color: [255, 0, 0] }, { value: 10000, color: [0, 255, 0] }],
     light: [{ value: 0, color: [255, 255, 255] }, { value: 3000, color: [255, 71, 71] }, { value: 10000, color: [0, 214, 0] }],
   }},
-  'ward:per_sqft':          { max: 10, hs: 550, stops: {
+  'ward:per_sqft':          { max: 10, maxHeight: 5500, stops: {
     dark:  [{ value: 0, color: [96, 96, 96] }, { value: 2.5, color: [255, 0, 0] }, { value: 7, color: [0, 255, 0] }],
     light: [{ value: 0, color: [255, 255, 255] }, { value: 2.5, color: [255, 71, 71] }, { value: 7, color: [0, 214, 0] }],
   }},
-  'ward:per_capita':        { max: 9000, hs: 0.6, stops: {
+  'ward:per_capita':        { max: 9000, maxHeight: 5400, stops: {
     dark:  [{ value: 0, color: [96, 96, 96] }, { value: 2500, color: [255, 0, 0] }, { value: 7000, color: [0, 255, 0] }],
     light: [{ value: 0, color: [255, 255, 255] }, { value: 2500, color: [255, 71, 71] }, { value: 7000, color: [0, 214, 0] }],
   }},
 }
 const SS_PREFIX = 'jc-taxes:'
 
-function ssSave(key: string, max: number, hs: number) {
-  sessionStorage.setItem(`${SS_PREFIX}${key}:max`, String(max))
-  sessionStorage.setItem(`${SS_PREFIX}${key}:hs`, String(hs))
+function ssSave(key: string, mh: number) {
+  sessionStorage.setItem(`${SS_PREFIX}${key}:mh`, String(mh))
 }
-function ssLoad(key: string): { max: number, hs: number } | null {
-  const m = sessionStorage.getItem(`${SS_PREFIX}${key}:max`)
-  const h = sessionStorage.getItem(`${SS_PREFIX}${key}:hs`)
-  if (m == null || h == null) return null
-  return { max: Number(m), hs: Number(h) }
+function ssLoad(key: string): { mh: number } | null {
+  const v = sessionStorage.getItem(`${SS_PREFIX}${key}:mh`)
+  if (v == null) return null
+  return { mh: Number(v) }
 }
 
 const HOVER_COLOR: [number, number, number, number] = [255, 255, 100, 220]
@@ -171,10 +168,9 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(() => window.innerWidth > 768)
 
-  // URL-persisted state (max/hs are optional; absent = use mode defaults)
+  // URL-persisted state (mh is optional; absent = use mode default)
   const [year, setYear] = useUrlState('y', intParam(2025))
-  const [maxValRaw, setMaxValRaw] = useUrlState('max', optNumParam)
-  const [heightScaleRaw, setHeightScaleRaw] = useUrlState('hs', optNumParam)
+  const [maxHeightRaw, setMaxHeightRaw] = useUrlState('mh', optNumParam)
   const [aggregateMode, setAggregateModeRaw] = useUrlState('agg', stringParam('block'))
   const [colorScale, setColorScale] = useUrlState('scale', scaleParam('log'))
   const [metricMode, setMetricModeRaw] = useUrlState('metric', stringParam('per_sqft'))
@@ -183,16 +179,11 @@ export default function App() {
   const modeKey = getModeKey(aggregateMode, metricMode)
   const modeConf = MODE_DEFAULTS[modeKey] ?? MODE_DEFAULTS['block']
 
-  // Effective max/hs: URL value if explicitly set, else mode default
-  const maxVal = maxValRaw ?? modeConf.max
-  const heightScale = heightScaleRaw ?? modeConf.hs
-  // Setters: write to URL only when value differs from mode default
-  const setMaxVal = useCallback((v: number) => {
-    setMaxValRaw(v === modeConf.max ? undefined : v)
-  }, [modeConf.max, setMaxValRaw])
-  const setHeightScale = useCallback((v: number) => {
-    setHeightScaleRaw(v === modeConf.hs ? undefined : v)
-  }, [modeConf.hs, setHeightScaleRaw])
+  // Derived: maxVal is always the mode default (no longer user-facing)
+  const maxVal = modeConf.max
+  // Effective max height: URL value if explicitly set, else mode default
+  const maxHeight = maxHeightRaw ?? modeConf.maxHeight
+  const heightScale = maxHeight / modeConf.max
 
   // Color stops: use custom (from URL `c`) → mode-specific → theme defaults
   const { actualTheme, toggleTheme, colorStops: themeStops, hasCustomStops, setColorStops, resetColorStops: resetColorStopsRaw } = useTheme()
@@ -209,10 +200,10 @@ export default function App() {
 
   // Mode-aware switching: save customizations to SS, clear URL params for new mode
   const switchToMode = useCallback((newAgg: string, newMetric: string) => {
-    // Save current customizations to SS (only if user changed from defaults)
-    if (maxValRaw != null || heightScaleRaw != null) {
+    // Save current max height to SS (only if user changed from default)
+    if (maxHeightRaw != null) {
       const oldKey = getModeKey(aggregateMode, metricMode)
-      ssSave(oldKey, maxVal, heightScale)
+      ssSave(oldKey, maxHeight)
     }
 
     // Reset metric to per_sqft for non-census modes
@@ -221,12 +212,11 @@ export default function App() {
 
     // Restore from SS if user previously customized this mode, else clear (use defaults)
     const saved = ssLoad(newKey)
-    setMaxValRaw(saved ? saved.max : undefined)
-    setHeightScaleRaw(saved ? saved.hs : undefined)
+    setMaxHeightRaw(saved ? saved.mh : undefined)
 
     // Clear custom color stops; mode stops or theme defaults will apply
     if (hasCustomStops) resetColorStopsRaw()
-  }, [aggregateMode, metricMode, maxVal, heightScale, maxValRaw, heightScaleRaw, hasCustomStops, resetColorStopsRaw])
+  }, [aggregateMode, metricMode, maxHeight, maxHeightRaw, hasCustomStops, resetColorStopsRaw])
 
   const setAggregateMode = useCallback((newAgg: string) => {
     const newMetric = (newAgg === 'census-block' || newAgg === 'ward') ? metricMode : 'per_sqft'
@@ -464,15 +454,6 @@ export default function App() {
                 ))}
               </select>
             </label>
-            <label>
-              Max ${metricMode === 'per_capita' ? '/capita' : '/sqft'}:{' '}
-              <input
-                type="number"
-                value={maxVal}
-                onChange={(e) => setMaxVal(Number(e.target.value) || 100)}
-                style={{ ...inputStyle, width: 80 }}
-              />
-            </label>
             <div style={{ borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 4 }}>
               <div style={{ marginBottom: 6, fontSize: 12, color: 'var(--text-secondary)' }}>Color Gradient</div>
               <GradientEditor
@@ -480,8 +461,8 @@ export default function App() {
                 setStops={setColorStops}
                 scale={colorScale}
                 setScale={setColorScale}
-                max={maxVal}
-                onReset={resetColorStops}
+                max={modeConf.max}
+                onReset={hasCustomStops ? resetColorStops : undefined}
                 metricLabel={metricMode === 'per_capita' ? '/capita' : '/sqft'}
               />
             </div>
@@ -512,16 +493,31 @@ export default function App() {
                 </select>
               </label>
             )}
-            <label>
-              Height scale:{' '}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              Max height:{' '}
               <input
                 type="number"
-                value={heightScale}
-                onChange={(e) => setHeightScale(Number(e.target.value) || 1)}
-                style={{ ...inputStyle, width: 70 }}
-                min={0.01}
-                step={heightScale < 1 ? 0.1 : heightScale < 10 ? 1 : 5}
+                value={Math.round(maxHeight / 100) / 10}
+                onChange={(e) => {
+                  const km = Number(e.target.value)
+                  if (!km || km <= 0) return
+                  const m = Math.round(km * 1000)
+                  setMaxHeightRaw(m === modeConf.maxHeight ? undefined : m)
+                }}
+                style={{ ...inputStyle, width: 60 }}
+                min={0.1}
+                step={0.5}
               />
+              <span>km</span>
+              {maxHeightRaw !== undefined && (
+                <button
+                  onClick={() => setMaxHeightRaw(undefined)}
+                  title="Reset to default"
+                  style={{ ...inputStyle, cursor: 'pointer', padding: '2px 6px', fontSize: 14 }}
+                >
+                  ↺
+                </button>
+              )}
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               Pitch: {Math.round(viewState.pitch)}°
@@ -575,6 +571,7 @@ export default function App() {
                 {info.addr && <div><strong>{info.addr}</strong></div>}
                 {info.streets && !info.addr && <div><strong>{info.streets}</strong></div>}
                 <div>Block{info.lot ? ': ' : ' '}{info.block}{info.lot ? `-${info.lot}` : ''}{info.qual ? `-${info.qual}` : ''}</div>
+                {info.owner && <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{info.owner}</div>}
               </>
             )}
             {info.area_sqft !== undefined && info.area_sqft > 0 && (
