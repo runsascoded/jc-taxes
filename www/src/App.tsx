@@ -5,7 +5,7 @@ import { WebMercatorViewport } from '@deck.gl/core'
 import { GeoJsonLayer } from '@deck.gl/layers'
 import { useUrlState, intParam, stringParam } from 'use-prms'
 import type { Param } from 'use-prms'
-import { KbdModal, KbdOmnibar, useHotkeysContext } from 'use-kbd'
+import { KbdModal, KbdOmnibar, KbdLookup, useHotkeysContext } from 'use-kbd'
 import { resolve as dvcResolve } from 'virtual:dvc-data'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import { useKeyboardShortcuts, type ViewState } from './useKeyboardShortcuts'
@@ -908,7 +908,7 @@ export default function App() {
         {loading ? 'Loading...' : `${data?.length.toLocaleString()} parcels`}
         {window.innerWidth > 768 && (
           <span style={{ marginLeft: 12, color: 'var(--text-secondary)' }}>
-            Press <KbdModal /> for shortcuts, <KbdOmnibar /> to search
+            Press <KbdModal /> for shortcuts, <KbdOmnibar /> to search, <KbdLookup /> to lookup
           </span>
         )}
       </div>
