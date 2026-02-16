@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Map } from 'react-map-gl/maplibre'
 import DeckGL from '@deck.gl/react'
+import { WebMercatorViewport } from '@deck.gl/core'
 import { GeoJsonLayer } from '@deck.gl/layers'
 import { useUrlState, intParam, stringParam } from 'use-prms'
 import type { Param } from 'use-prms'
@@ -104,6 +105,7 @@ function getModeKey(agg: string, metric: string): string {
 type ModeConfig = {
   max: number
   maxHeight: number
+  scale?: ScaleType
   stops?: { dark: ColorStop[], light: ColorStop[] }
 }
 const MODE_DEFAULTS: Record<string, ModeConfig> = {
@@ -114,37 +116,40 @@ const MODE_DEFAULTS: Record<string, ModeConfig> = {
     dark:  [{ value: 0, color: [96, 96, 96] }, { value: 1.5, color: [255, 0, 0] }, { value: 12, color: [0, 255, 0] }],
     light: [{ value: 0, color: [255, 255, 255] }, { value: 1.5, color: [255, 71, 71] }, { value: 12, color: [0, 214, 0] }],
   }},
-  'census-block:per_capita':{ max: 15000, maxHeight: 4500, stops: {
+  'census-block:per_capita':{ max: 15000, maxHeight: 4500, scale: 'sqrt', stops: {
     dark:  [{ value: 0, color: [96, 96, 96] }, { value: 3000, color: [255, 0, 0] }, { value: 10000, color: [0, 255, 0] }],
     light: [{ value: 0, color: [255, 255, 255] }, { value: 3000, color: [255, 71, 71] }, { value: 10000, color: [0, 214, 0] }],
   }},
-  'ward:per_sqft':          { max: 10, maxHeight: 5500, stops: {
-    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 2.5, color: [255, 0, 0] }, { value: 7, color: [0, 255, 0] }],
-    light: [{ value: 0, color: [255, 255, 255] }, { value: 2.5, color: [255, 71, 71] }, { value: 7, color: [0, 214, 0] }],
+  'ward:per_sqft':          { max: 10, maxHeight: 5500, scale: 'linear', stops: {
+    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 4.9, color: [255, 0, 0] }, { value: 8.6, color: [0, 255, 0] }],
+    light: [{ value: 0, color: [255, 255, 255] }, { value: 4.9, color: [255, 71, 71] }, { value: 8.6, color: [0, 214, 0] }],
   }},
-  'ward:per_capita':        { max: 9000, maxHeight: 5400, stops: {
+  'ward:per_capita':        { max: 9000, maxHeight: 5400, scale: 'sqrt', stops: {
     dark:  [{ value: 0, color: [96, 96, 96] }, { value: 2500, color: [255, 0, 0] }, { value: 7000, color: [0, 255, 0] }],
     light: [{ value: 0, color: [255, 255, 255] }, { value: 2500, color: [255, 71, 71] }, { value: 7000, color: [0, 214, 0] }],
   }},
 }
 const SS_PREFIX = 'jc-taxes:'
 
-function ssSave(key: string, mh: number) {
-  sessionStorage.setItem(`${SS_PREFIX}${key}:mh`, String(mh))
+function ssSave(key: string, field: string, value: string) {
+  sessionStorage.setItem(`${SS_PREFIX}${key}:${field}`, value)
 }
-function ssLoad(key: string): { mh: number } | null {
-  const v = sessionStorage.getItem(`${SS_PREFIX}${key}:mh`)
-  if (v == null) return null
-  return { mh: Number(v) }
+function ssLoad(key: string, field: string): string | null {
+  return sessionStorage.getItem(`${SS_PREFIX}${key}:${field}`)
 }
 
 const HOVER_COLOR: [number, number, number, number] = [255, 255, 100, 220]
 const SELECTED_COLOR: [number, number, number, number] = [100, 200, 255, 230]
 
-const scaleParam = (defaultVal: ScaleType) => ({
-  decode: (s: string | null) => (s as ScaleType) ?? defaultVal,
-  encode: (v: ScaleType) => v,
-})
+const optScaleParam: Param<ScaleType | undefined> = {
+  decode: (s: string | undefined) => (s as ScaleType) ?? undefined,
+  encode: (v: ScaleType | undefined) => v == null ? undefined as unknown as string : v,
+}
+
+const boolParam: Param<boolean> = {
+  decode: (s: string | undefined) => s === '1',
+  encode: (v: boolean) => v ? '1' : undefined as unknown as string,
+}
 
 const optNumParam: Param<number | undefined> = {
   decode: (s: string | undefined) => {
@@ -172,8 +177,10 @@ export default function App() {
   const [year, setYear] = useUrlState('y', intParam(2025))
   const [maxHeightRaw, setMaxHeightRaw] = useUrlState('mh', optNumParam)
   const [aggregateMode, setAggregateModeRaw] = useUrlState('agg', stringParam('block'))
-  const [colorScale, setColorScale] = useUrlState('scale', scaleParam('log'))
+  const [colorScaleRaw, setColorScaleRaw] = useUrlState('scale', optScaleParam)
   const [metricMode, setMetricModeRaw] = useUrlState('metric', stringParam('per_sqft'))
+  const [wardGeom, setWardGeom] = useUrlState('wg', stringParam('merged'))
+  const [wardLabels, setWardLabels] = useUrlState('wl', boolParam)
 
   const hasPopulation = aggregateMode === 'census-block' || aggregateMode === 'ward'
   const modeKey = getModeKey(aggregateMode, metricMode)
@@ -184,6 +191,8 @@ export default function App() {
   // Effective max height: URL value if explicitly set, else mode default
   const maxHeight = maxHeightRaw ?? modeConf.maxHeight
   const heightScale = maxHeight / modeConf.max
+  // Effective color scale: URL value if explicitly set, else mode default
+  const colorScale = colorScaleRaw ?? modeConf.scale ?? 'log'
 
   // Color stops: use custom (from URL `c`) → mode-specific → theme defaults
   const { actualTheme, toggleTheme, colorStops: themeStops, hasCustomStops, setColorStops, resetColorStops: resetColorStopsRaw } = useTheme()
@@ -200,23 +209,24 @@ export default function App() {
 
   // Mode-aware switching: save customizations to SS, clear URL params for new mode
   const switchToMode = useCallback((newAgg: string, newMetric: string) => {
-    // Save current max height to SS (only if user changed from default)
-    if (maxHeightRaw != null) {
-      const oldKey = getModeKey(aggregateMode, metricMode)
-      ssSave(oldKey, maxHeight)
-    }
+    const oldKey = getModeKey(aggregateMode, metricMode)
+    // Save current customizations to SS (only if user changed from default)
+    if (maxHeightRaw != null) ssSave(oldKey, 'mh', String(maxHeight))
+    if (colorScaleRaw != null) ssSave(oldKey, 'scale', colorScaleRaw)
 
     // Reset metric to per_sqft for non-census modes
     const effectiveMetric = (newAgg === 'census-block' || newAgg === 'ward') ? newMetric : 'per_sqft'
     const newKey = getModeKey(newAgg, effectiveMetric)
 
     // Restore from SS if user previously customized this mode, else clear (use defaults)
-    const saved = ssLoad(newKey)
-    setMaxHeightRaw(saved ? saved.mh : undefined)
+    const savedMh = ssLoad(newKey, 'mh')
+    setMaxHeightRaw(savedMh ? Number(savedMh) : undefined)
+    const savedScale = ssLoad(newKey, 'scale')
+    setColorScaleRaw((savedScale as ScaleType) ?? undefined)
 
     // Clear custom color stops; mode stops or theme defaults will apply
     if (hasCustomStops) resetColorStopsRaw()
-  }, [aggregateMode, metricMode, maxHeight, maxHeightRaw, hasCustomStops, resetColorStopsRaw])
+  }, [aggregateMode, metricMode, maxHeight, maxHeightRaw, colorScaleRaw, hasCustomStops, resetColorStopsRaw])
 
   const setAggregateMode = useCallback((newAgg: string) => {
     const newMetric = (newAgg === 'census-block' || newAgg === 'ward') ? metricMode : 'per_sqft'
@@ -257,6 +267,8 @@ export default function App() {
     settingsOpen, setSettingsOpen,
     setViewState,
     toggleTheme,
+    wardLabels, setWardLabels,
+    wardGeom, setWardGeom,
   })
 
   // Two-finger pitch gesture for mobile (deck.gl's built-in multipan is broken)
@@ -291,6 +303,231 @@ export default function App() {
         setLoading(false)
       })
   }, [year, aggregateMode])
+
+  // For ward mode: swap geometry based on wardGeom setting
+  const effectiveData = useMemo(() => {
+    if (!data || aggregateMode !== 'ward' || wardGeom === 'merged') return data
+    const prop = wardGeom === 'lots' ? 'lots' : wardGeom === 'blocks' ? 'blocks' : wardGeom === 'boundary' ? 'boundary' : null
+    if (!prop) return data
+    return data.map(f => {
+      const alt = f.properties?.[prop as keyof typeof f.properties]
+      if (!alt) return f
+      return { ...f, geometry: alt as ParcelFeature['geometry'] }
+    })
+  }, [data, aggregateMode, wardGeom])
+
+  // Ward label info: stable text/metadata (doesn't depend on viewState)
+  type WardLabelInfo = { ward: string; text: string; metricVal: number; rings: number[][][] }
+  const wardLabelInfo = useMemo((): WardLabelInfo[] => {
+    if (!data || aggregateMode !== 'ward' || !wardLabels) return []
+    return data.map(f => {
+      const p = f.properties
+      if (!p?.ward) return null
+      const metricVal = metricMode === 'per_capita' ? (p.paid_per_capita ?? 0) : (p.paid_per_sqft ?? 0)
+      const rings = f.geometry.type === 'Polygon' ? [f.geometry.coordinates[0]] : f.geometry.coordinates.map(p => p[0])
+      const lines = [`Ward ${p.ward}`]
+      if (p.population) lines.push(`Pop: ${p.population.toLocaleString()}`)
+      if (p.paid) lines.push(`Paid: $${(p.paid / 1e6).toFixed(1)}M`)
+      if (p.paid_per_sqft) lines.push(`$${p.paid_per_sqft.toFixed(2)}/sqft`)
+      if (p.paid_per_capita) lines.push(`$${p.paid_per_capita.toLocaleString()}/capita`)
+      return { ward: p.ward, text: lines.join('\n'), metricVal, rings }
+    }).filter((x): x is WardLabelInfo => x !== null)
+  }, [data, aggregateMode, wardLabels, metricMode])
+
+  // Screen-space label positions via offscreen rasterization.
+  // Projects each ward's extruded 3D geometry (top face, base face, side quads)
+  // to screen space, rasterizes with unique colors per ward using painter's algorithm
+  // (depth-sorted back-to-front for occlusion), then reads back pixels to find
+  // each ward's visible-pixel centroid.
+  type WardScreenLabel = { x: number; y: number; text: string; ward: string }
+  const wardScreenLabels = useMemo((): WardScreenLabel[] => {
+    if (wardLabelInfo.length === 0) return []
+    const viewport = new WebMercatorViewport({
+      width: window.innerWidth,
+      height: window.innerHeight,
+      ...viewState,
+    })
+    const SCALE = 4
+    const W = Math.ceil(window.innerWidth / SCALE)
+    const H = Math.ceil(window.innerHeight / SCALE)
+
+    // Build depth-sorted faces for painter's algorithm
+    type Face = { wardIdx: number; pts: [number, number][]; depth: number }
+    const faces: Face[] = []
+
+    for (let wi = 0; wi < wardLabelInfo.length; wi++) {
+      const { metricVal, rings } = wardLabelInfo[wi]
+      const elev = metricVal * heightScale
+
+      for (const ring of rings) {
+        const n = ring.length
+        if (n < 3) continue
+
+        // Project all vertices at ground and top elevation
+        const base: { x: number; y: number; z: number }[] = []
+        const top: { x: number; y: number; z: number }[] = []
+        let valid = true
+        for (const [lng, lat] of ring) {
+          const pb = viewport.project([lng, lat, 0])
+          const pt = viewport.project([lng, lat, elev])
+          if (!isFinite(pb[0]) || !isFinite(pt[0])) { valid = false; break }
+          base.push({ x: pb[0] / SCALE, y: pb[1] / SCALE, z: pb[2] ?? 0 })
+          top.push({ x: pt[0] / SCALE, y: pt[1] / SCALE, z: pt[2] ?? 0 })
+        }
+        if (!valid) continue
+
+        // Top face
+        faces.push({
+          wardIdx: wi,
+          pts: top.map(p => [p.x, p.y] as [number, number]),
+          depth: top.reduce((s, p) => s + p.z, 0) / n,
+        })
+        // Base face
+        faces.push({
+          wardIdx: wi,
+          pts: base.map(p => [p.x, p.y] as [number, number]),
+          depth: base.reduce((s, p) => s + p.z, 0) / n,
+        })
+        // Side quads
+        for (let i = 0; i < n - 1; i++) {
+          faces.push({
+            wardIdx: wi,
+            pts: [
+              [base[i].x, base[i].y],
+              [base[i + 1].x, base[i + 1].y],
+              [top[i + 1].x, top[i + 1].y],
+              [top[i].x, top[i].y],
+            ],
+            depth: (base[i].z + base[i + 1].z + top[i + 1].z + top[i].z) / 4,
+          })
+        }
+      }
+    }
+
+    // Painter's algorithm: draw further faces first (larger depth)
+    faces.sort((a, b) => b.depth - a.depth)
+
+    // Rasterize to offscreen canvas with unique color per ward
+    const canvas = document.createElement('canvas')
+    canvas.width = W
+    canvas.height = H
+    const ctx = canvas.getContext('2d')!
+    ctx.clearRect(0, 0, W, H)
+
+    for (const face of faces) {
+      ctx.fillStyle = `rgb(${face.wardIdx + 1},0,0)`
+      ctx.beginPath()
+      ctx.moveTo(face.pts[0][0], face.pts[0][1])
+      for (let i = 1; i < face.pts.length; i++) {
+        ctx.lineTo(face.pts[i][0], face.pts[i][1])
+      }
+      ctx.closePath()
+      ctx.fill()
+    }
+
+    // Read back pixels into a ward-index grid
+    const imgData = ctx.getImageData(0, 0, W, H)
+    const pixels = imgData.data
+    const grid = new Int8Array(W * H).fill(-1)
+    for (let i = 0; i < W * H; i++) {
+      const r = pixels[i * 4]
+      if (r >= 1 && r <= wardLabelInfo.length) grid[i] = r - 1
+    }
+
+    // Connected component analysis: BFS to find largest cluster per ward
+    const visited = new Uint8Array(W * H)
+    type Cluster = { sx: number; sy: number; n: number }
+    const bestCluster: (Cluster | null)[] = wardLabelInfo.map(() => null)
+    const DIRS = [1, -1, W, -W]
+
+    for (let i = 0; i < W * H; i++) {
+      if (grid[i] < 0 || visited[i]) continue
+      const wi = grid[i]
+      let sx = 0, sy = 0, n = 0
+      const queue = [i]
+      visited[i] = 1
+      let head = 0
+      while (head < queue.length) {
+        const cur = queue[head++]
+        const row = (cur / W) | 0, col = cur % W
+        sx += col * SCALE
+        sy += row * SCALE
+        n++
+        for (const d of DIRS) {
+          const ni = cur + d
+          // Bounds check: skip if wrapping row or out of range
+          if (ni < 0 || ni >= W * H || visited[ni] || grid[ni] !== wi) continue
+          if (Math.abs(d) === 1 && ((cur / W) | 0) !== ((ni / W) | 0)) continue
+          visited[ni] = 1
+          queue.push(ni)
+        }
+      }
+      const prev = bestCluster[wi]
+      if (!prev || n > prev.n) bestCluster[wi] = { sx, sy, n }
+    }
+
+    // Initial label positions from largest cluster centroids
+    const labels: WardScreenLabel[] = []
+    for (let wi = 0; wi < wardLabelInfo.length; wi++) {
+      const c = bestCluster[wi]
+      if (!c || c.n === 0) continue
+      labels.push({
+        x: c.sx / c.n,
+        y: c.sy / c.n,
+        text: wardLabelInfo[wi].text,
+        ward: wardLabelInfo[wi].ward,
+      })
+    }
+
+    // Collision avoidance: iteratively push overlapping labels apart
+    const labelW = (text: string) => {
+      const lines = text.split('\n')
+      return Math.max(...lines.map(l => l.length)) * 8.5 + 16
+    }
+    const labelH = (text: string) => text.split('\n').length * 17 + 8
+    const VW = window.innerWidth, VH = window.innerHeight
+    const PAD = 8
+
+    // Center of mass for outward bias when labels coincide
+    const comX = labels.length > 0 ? labels.reduce((s, l) => s + l.x, 0) / labels.length : 0
+    const comY = labels.length > 0 ? labels.reduce((s, l) => s + l.y, 0) / labels.length : 0
+
+    for (let iter = 0; iter < 50; iter++) {
+      let maxOverlap = 0
+      for (let i = 0; i < labels.length; i++) {
+        const wi = labelW(labels[i].text), hi = labelH(labels[i].text)
+        for (let j = i + 1; j < labels.length; j++) {
+          const wj = labelW(labels[j].text), hj = labelH(labels[j].text)
+          const overlapX = (wi + wj) / 2 + PAD - Math.abs(labels[i].x - labels[j].x)
+          const overlapY = (hi + hj) / 2 + PAD - Math.abs(labels[i].y - labels[j].y)
+          if (overlapX <= 0 || overlapY <= 0) continue
+          maxOverlap = Math.max(maxOverlap, Math.min(overlapX, overlapY))
+
+          // Push apart along smaller overlap axis (resolves fastest)
+          if (overlapX < overlapY) {
+            const sign = labels[i].x <= labels[j].x ? -1 : 1
+            labels[i].x += sign * overlapX * 0.55
+            labels[j].x -= sign * overlapX * 0.55
+          } else {
+            const sign = labels[i].y <= labels[j].y ? -1 : 1
+            labels[i].y += sign * overlapY * 0.55
+            labels[j].y -= sign * overlapY * 0.55
+          }
+        }
+      }
+
+      // Clamp labels to viewport
+      for (const label of labels) {
+        const hw = labelW(label.text) / 2, hh = labelH(label.text) / 2
+        label.x = Math.max(hw + 4, Math.min(VW - hw - 4, label.x))
+        label.y = Math.max(hh + 4, Math.min(VH - hh - 4, label.y))
+      }
+
+      if (maxOverlap < 1) break
+    }
+
+    return labels
+  }, [wardLabelInfo, viewState, heightScale])
 
   const getFeatureId = useCallback((f: ParcelFeature) => {
     const p = f.properties
@@ -331,7 +568,7 @@ export default function App() {
   const layers = [
     new GeoJsonLayer<ParcelFeature>({
       id: 'parcels',
-      data: data ?? [],
+      data: effectiveData ?? [],
       filled: true,
       extruded: true,
       wireframe: true,
@@ -460,7 +697,7 @@ export default function App() {
                 stops={colorStops}
                 setStops={setColorStops}
                 scale={colorScale}
-                setScale={setColorScale}
+                setScale={(s) => setColorScaleRaw(s === (modeConf.scale ?? 'log') ? undefined : s)}
                 max={modeConf.max}
                 onReset={hasCustomStops ? resetColorStops : undefined}
                 metricLabel={metricMode === 'per_capita' ? '/capita' : '/sqft'}
@@ -493,6 +730,29 @@ export default function App() {
                 </select>
               </label>
             )}
+            {aggregateMode === 'ward' && (<>
+              <label>
+                Geometry:{' '}
+                <select
+                  value={wardGeom}
+                  onChange={(e) => setWardGeom(e.target.value)}
+                  style={inputStyle}
+                >
+                  <option value="merged">Merged</option>
+                  <option value="blocks">Tax blocks</option>
+                  <option value="lots">Tax lots</option>
+                  <option value="boundary">Full boundary</option>
+                </select>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={wardLabels}
+                  onChange={(e) => setWardLabels(e.target.checked)}
+                />
+                Ward labels
+              </label>
+            </>)}
             <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               Max height:{' '}
               <input
@@ -604,6 +864,32 @@ export default function App() {
           <div style={{ fontSize: 14, color: '#ccc' }}>{webglError}</div>
         </div>
       )}
+
+      {/* Ward labels (HTML overlay, pure screen-space) */}
+      {wardScreenLabels.map(label => (
+        <div
+          key={label.ward}
+          style={{
+            position: 'absolute',
+            left: label.x,
+            top: label.y,
+            transform: 'translate(-50%, -50%)',
+            color: actualTheme === 'dark' ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.9)',
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+            fontWeight: 700,
+            fontSize: 14,
+            textAlign: 'center',
+            whiteSpace: 'pre-line',
+            textShadow: actualTheme === 'dark'
+              ? '0 0 4px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.6)'
+              : '0 0 4px rgba(255,255,255,0.9), 0 0 8px rgba(255,255,255,0.6)',
+            pointerEvents: 'none',
+            zIndex: 2,
+          }}
+        >
+          {label.text}
+        </div>
+      ))}
 
       {/* Status bar */}
       <div

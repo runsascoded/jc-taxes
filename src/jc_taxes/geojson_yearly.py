@@ -504,6 +504,21 @@ def _build_lot_gdf(parcels: pd.DataFrame, payments: pd.DataFrame) -> gpd.GeoData
     return gdf
 
 
+_MIN_HOLE_SQFT = 200_000  # ~5 acres; keeps LSP, reservoir, large parks
+
+def _remove_small_holes(geom):
+    """Remove interior holes smaller than threshold from polygon/multipolygon."""
+    from shapely.geometry import Polygon, MultiPolygon
+    if geom is None or geom.is_empty:
+        return geom
+    if geom.geom_type == 'Polygon':
+        kept = [r for r in geom.interiors if Polygon(r).area >= _MIN_HOLE_SQFT]
+        return Polygon(geom.exterior, kept)
+    if geom.geom_type == 'MultiPolygon':
+        return MultiPolygon([_remove_small_holes(p) for p in geom.geoms])
+    return geom
+
+
 def _generate_census_geojson(
     year: int,
     aggregate: str,
@@ -563,17 +578,49 @@ def _generate_census_geojson(
     # Simplify: 5ft tolerance ≈ invisible at map zoom levels, big vertex reduction
     cb_trimmed_proj = cb_trimmed_proj.simplify(5)
     cb_trimmed = cb_trimmed_proj.to_crs("EPSG:4326") if hasattr(cb_trimmed_proj, 'to_crs') else gpd.GeoSeries(cb_trimmed_proj, crs="EPSG:3424").to_crs("EPSG:4326")
-    # Also build per-ward trimmed geometry
-    paying_proj_ward = paying_proj.copy()
+    # Build per-ward lot-fragment geometry (paying lots dissolved per ward)
+    err("Building ward lot-fragment geometries...")
+    paying_proj_ward = paying_overlay.copy()
     paying_proj_ward["ward"] = paying_proj_ward["GEOID"].map(
         cb_result.set_index("GEOID")["ward"]
     )
-    ward_trimmed_proj = paying_proj_ward.dissolve(by="ward").geometry
-    ward_trimmed_proj = ward_trimmed_proj.simplify(5)
-    ward_trimmed = ward_trimmed_proj.to_crs("EPSG:4326") if hasattr(ward_trimmed_proj, 'to_crs') else gpd.GeoSeries(ward_trimmed_proj, crs="EPSG:3424").to_crs("EPSG:4326")
+    ward_lots_proj = paying_proj_ward.dissolve(by="ward").geometry.simplify(5)
+    ward_lots = gpd.GeoSeries(ward_lots_proj, crs="EPSG:3424").to_crs("EPSG:4326")
+
+    # Build per-ward block-level geometry (lots dissolved per block, collected per ward)
+    err("Building ward block-level geometries...")
+    paying_proj_ward["block_num"] = paying_proj_ward["join_key"].str.split("-").str[0]
+    block_dissolved = paying_proj_ward.dissolve(by=["ward", "block_num"]).geometry.simplify(5)
+    from shapely.geometry import MultiPolygon as ShapelyMultiPolygon
+    ward_blocks_dict: dict[str, shapely.Geometry] = {}
+    for ward_name, group in block_dissolved.groupby(level="ward"):
+        polys = []
+        for geom in group.values:
+            if geom.geom_type == 'Polygon':
+                polys.append(geom)
+            elif geom.geom_type == 'MultiPolygon':
+                polys.extend(geom.geoms)
+        ward_blocks_dict[ward_name] = ShapelyMultiPolygon(polys) if polys else None
+    ward_blocks = gpd.GeoSeries(ward_blocks_dict, crs="EPSG:3424").to_crs("EPSG:4326")
+
+    # Build per-ward merged boundary: buffer-dissolve ALL lots (not just paid)
+    # to create cohesive ward shapes that excise large parks, LSP, water
+    err("Building ward merged boundaries from buffered lot geometries...")
+    all_overlay_ward = overlay.copy()
+    all_overlay_ward["ward"] = all_overlay_ward["GEOID"].map(
+        cb_result.set_index("GEOID")["ward"]
+    )
+    # 50ft buffer bridges typical JC street widths (40-60ft curb-to-curb)
+    all_overlay_ward["geometry"] = all_overlay_ward.geometry.buffer(50)
+    ward_buffered = all_overlay_ward.dissolve(by="ward").geometry
+    # Negative buffer restores outer boundary, simplify to reduce vertices
+    ward_merged_proj = ward_buffered.buffer(-50).simplify(10)
+    # Remove small interior holes (< 200,000 sqft / ~5 acres) to avoid swiss-cheese
+    ward_merged_proj = ward_merged_proj.apply(_remove_small_holes)
+    ward_merged = gpd.GeoSeries(ward_merged_proj, crs="EPSG:3424").to_crs("EPSG:4326")
 
     if aggregate == "ward":
-        return _aggregate_to_wards(year, cb_result, ward_trimmed, output_dir)
+        return _aggregate_to_wards(year, cb_result, ward_merged, ward_lots, ward_blocks, output_dir)
 
     # census-block output
     features = []
@@ -603,7 +650,9 @@ def _generate_census_geojson(
 def _aggregate_to_wards(
     year: int,
     cb_result: gpd.GeoDataFrame,
-    ward_trimmed: gpd.GeoSeries,
+    ward_merged: gpd.GeoSeries,
+    ward_lots: gpd.GeoSeries,
+    ward_blocks: gpd.GeoSeries,
     output_dir: Path,
 ) -> dict:
     """Aggregate census-block results to ward level."""
@@ -632,9 +681,8 @@ def _aggregate_to_wards(
     features = []
     for _, row in ward_result.iterrows():
         ward = row["ward"]
-        geom = ward_trimmed.get(ward, row.geometry)
-        if geom is None or geom.is_empty:
-            geom = row.geometry
+        merged = ward_merged.get(ward)
+        geom = merged if merged is not None and not merged.is_empty else row.geometry
         geojson_geom = json.loads(shapely.to_geojson(geom))
         props = {
             "ward": ward,
@@ -647,6 +695,14 @@ def _aggregate_to_wards(
             "population": int(row["population"]),
             "paid_per_capita": round(row["paid_per_capita"], 2) if pd.notna(row["paid_per_capita"]) else None,
         }
+        # Alternate geometry options for frontend toggle
+        lots = ward_lots.get(ward)
+        if lots is not None and not lots.is_empty:
+            props["lots"] = json.loads(shapely.to_geojson(lots))
+        blocks = ward_blocks.get(ward)
+        if blocks is not None and not blocks.is_empty:
+            props["blocks"] = json.loads(shapely.to_geojson(blocks))
+        props["boundary"] = json.loads(shapely.to_geojson(row.geometry))
         features.append({"type": "Feature", "geometry": geojson_geom, "properties": props})
 
     err(f"Generated {len(features)} ward features")

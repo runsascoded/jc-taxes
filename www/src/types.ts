@@ -1,4 +1,4 @@
-import type { Feature, Polygon, MultiPolygon } from 'geojson'
+import type { Feature, Geometry, Polygon, MultiPolygon } from 'geojson'
 
 export type ParcelProperties = {
   block?: string
@@ -17,6 +17,9 @@ export type ParcelProperties = {
   council_person?: string
   population?: number
   paid_per_capita?: number
+  lots?: Geometry      // tax-lot fragments geometry (ward geometry toggle)
+  blocks?: Geometry    // tax-block outlines geometry (ward geometry toggle)
+  boundary?: Geometry  // original ward boundary geometry (ward geometry toggle)
 }
 
 export type ParcelFeature = Feature<Polygon | MultiPolygon, ParcelProperties>

@@ -314,28 +314,42 @@ export default function GradientEditor({ stops, setStops, scale, setScale, max, 
 }
 
 // URL encoding helpers
+// Format: "value hex value hex ..." (space-separated pairs, no colons to avoid %3A)
+// Backwards-compatible decode also accepts old "value:hex" format
 export function encodeStops(stops: ColorStop[]): string {
   return stops
-    .map(s => `${s.value}:${s.color.map(c => c.toString(16).padStart(2, '0')).join('')}`)
+    .map(s => `${s.value} ${s.color.map(c => c.toString(16).padStart(2, '0')).join('')}`)
     .join(' ')
 }
 
 export function decodeStops(str: string): ColorStop[] | null {
   try {
     if (!str) return null
-    return str.split(/[, ]+/).map(part => {
-      const [valueStr, colorStr] = part.split(':')
-      const value = parseFloat(valueStr)
-      const color: [number, number, number] = [
-        parseInt(colorStr.slice(0, 2), 16),
-        parseInt(colorStr.slice(2, 4), 16),
-        parseInt(colorStr.slice(4, 6), 16),
-      ]
-      return { value, color }
-    })
+    // Old format: "value:hex value:hex ..." (colon-separated)
+    if (str.includes(':')) {
+      return str.split(/[, ]+/).map(part => {
+        const [valueStr, colorStr] = part.split(':')
+        return { value: parseFloat(valueStr), color: parseHex(colorStr) }
+      })
+    }
+    // New format: "value hex value hex ..." (space-separated pairs)
+    const tokens = str.split(/[, ]+/)
+    const stops: ColorStop[] = []
+    for (let i = 0; i < tokens.length - 1; i += 2) {
+      stops.push({ value: parseFloat(tokens[i]), color: parseHex(tokens[i + 1]) })
+    }
+    return stops.length > 0 ? stops : null
   } catch {
     return null
   }
+}
+
+function parseHex(hex: string): [number, number, number] {
+  return [
+    parseInt(hex.slice(0, 2), 16),
+    parseInt(hex.slice(2, 4), 16),
+    parseInt(hex.slice(4, 6), 16),
+  ]
 }
 
 export const DEFAULT_STOPS_DARK: ColorStop[] = [

@@ -11,6 +11,8 @@ export type ViewState = {
   bearing: number
 }
 
+const WARD_GEOMS = ['merged', 'blocks', 'lots', 'boundary'] as const
+
 type Props = {
   year: number
   setYear: (y: number) => void
@@ -23,6 +25,10 @@ type Props = {
   setSettingsOpen: (v: boolean | ((v: boolean) => boolean)) => void
   setViewState: Dispatch<SetStateAction<ViewState>>
   toggleTheme: () => void
+  wardLabels: boolean
+  setWardLabels: (v: boolean) => void
+  wardGeom: string
+  setWardGeom: (v: string) => void
 }
 
 export function useKeyboardShortcuts({
@@ -37,7 +43,12 @@ export function useKeyboardShortcuts({
   setSettingsOpen,
   setViewState,
   toggleTheme,
+  wardLabels,
+  setWardLabels,
+  wardGeom,
+  setWardGeom,
 }: Props) {
+  const isWardMode = aggregateMode === 'ward'
   const yearIdx = AVAILABLE_YEARS.indexOf(year)
 
   useAction('year:prev', {
@@ -129,5 +140,24 @@ export function useKeyboardShortcuts({
     group: 'UI',
     defaultBindings: ['d'],
     handler: () => setViewState(v => ({ ...v, pitch: 45 })),
+  })
+
+  useAction('ward:labels', {
+    label: 'Toggle ward labels',
+    group: 'Wards',
+    defaultBindings: ['shift+l'],
+    enabled: isWardMode,
+    handler: () => setWardLabels(!wardLabels),
+  })
+
+  useAction('ward:geom', {
+    label: 'Cycle ward geometry',
+    group: 'Wards',
+    defaultBindings: ['g'],
+    enabled: isWardMode,
+    handler: () => {
+      const idx = WARD_GEOMS.indexOf(wardGeom as typeof WARD_GEOMS[number])
+      setWardGeom(WARD_GEOMS[(idx + 1) % WARD_GEOMS.length])
+    },
   })
 }
