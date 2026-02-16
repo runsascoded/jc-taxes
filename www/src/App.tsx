@@ -140,6 +140,7 @@ function ssLoad(key: string, field: string): string | null {
 
 const HOVER_COLOR: [number, number, number, number] = [255, 255, 100, 220]
 const SELECTED_COLOR: [number, number, number, number] = [100, 200, 255, 230]
+const SELECTED_HOVER_COLOR: [number, number, number, number] = [160, 230, 255, 240]
 
 const optScaleParam: Param<ScaleType | undefined> = {
   decode: (s: string | undefined) => (s as ScaleType) ?? undefined,
@@ -559,7 +560,7 @@ export default function App() {
 
   const getFillColor = useCallback((f: ParcelFeature): [number, number, number, number] => {
     const id = getFeatureId(f)
-    if (id === selectedId) return SELECTED_COLOR
+    if (id === selectedId) return id === hoveredId ? SELECTED_HOVER_COLOR : SELECTED_COLOR
     if (id === hoveredId) return HOVER_COLOR
 
     return interpolateColor(getMetricValue(f), colorStops, maxVal, colorScale, fillAlpha)
