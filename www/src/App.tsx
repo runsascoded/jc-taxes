@@ -138,6 +138,7 @@ function ssLoad(key: string, field: string): string | null {
   return sessionStorage.getItem(`${SS_PREFIX}${key}:${field}`)
 }
 
+const LOADING_COLOR: [number, number, number, number] = [128, 128, 128, 60]
 const HOVER_COLOR: [number, number, number, number] = [255, 255, 100, 220]
 const SELECTED_COLOR: [number, number, number, number] = [100, 200, 255, 230]
 const SELECTED_HOVER_COLOR: [number, number, number, number] = [160, 230, 255, 240]
@@ -192,6 +193,9 @@ export default function App() {
   // Effective max height: URL value if explicitly set, else mode default
   const maxHeight = maxHeightRaw ?? modeConf.maxHeight
   const heightScale = maxHeight / modeConf.max
+  // Freeze height scale while loading to prevent stale data rendered with new-mode elevation
+  const stableHeightScaleRef = useRef(heightScale)
+  if (!loading) stableHeightScaleRef.current = heightScale
   // Effective color scale: URL value if explicitly set, else mode default
   const colorScale = colorScaleRaw ?? modeConf.scale ?? 'log'
 
@@ -230,6 +234,7 @@ export default function App() {
   }, [aggregateMode, metricMode, maxHeight, maxHeightRaw, colorScaleRaw, hasCustomStops, resetColorStopsRaw])
 
   const setAggregateMode = useCallback((newAgg: string) => {
+    setLoading(true)
     const newMetric = (newAgg === 'census-block' || newAgg === 'ward') ? metricMode : 'per_sqft'
     switchToMode(newAgg, newMetric)
     setAggregateModeRaw(newAgg)
@@ -567,13 +572,15 @@ export default function App() {
     return p?.paid_per_sqft ?? 0
   }, [metricMode])
 
+  const staleData = loading && data
   const getFillColor = useCallback((f: ParcelFeature): [number, number, number, number] => {
+    if (staleData) return LOADING_COLOR
     const id = getFeatureId(f)
     if (id === selectedId) return id === hoveredId ? SELECTED_HOVER_COLOR : SELECTED_COLOR
     if (id === hoveredId) return HOVER_COLOR
 
     return interpolateColor(getMetricValue(f), colorStops, maxVal, colorScale, fillAlpha)
-  }, [colorStops, colorScale, maxVal, hoveredId, selectedId, getFeatureId, fillAlpha, getMetricValue])
+  }, [staleData, colorStops, colorScale, maxVal, hoveredId, selectedId, getFeatureId, fillAlpha, getMetricValue])
 
   const layers = [
     new GeoJsonLayer<ParcelFeature>({
@@ -583,7 +590,7 @@ export default function App() {
       extruded: true,
       wireframe: true,
       getFillColor,
-      getElevation: (f) => getMetricValue(f) * heightScale,
+      getElevation: (f) => getMetricValue(f) * stableHeightScaleRef.current,
       getLineColor: lineColor,
       lineWidthMinPixels: 1,
       pickable: true,
@@ -609,8 +616,8 @@ export default function App() {
         }
       },
       updateTriggers: {
-        getFillColor: [year, maxVal, colorStops, colorScale, hoveredId, selectedId, aggregateMode, actualTheme, metricMode],
-        getElevation: [year, heightScale, aggregateMode, metricMode],
+        getFillColor: [year, maxVal, colorStops, colorScale, hoveredId, selectedId, aggregateMode, actualTheme, metricMode, staleData],
+        getElevation: [year, stableHeightScaleRef.current, aggregateMode, metricMode],
         getLineColor: [actualTheme],
       },
     }),
