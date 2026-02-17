@@ -267,6 +267,8 @@ export default function App() {
     hasPopulation, metricMode, setMetricMode,
     settingsOpen, setSettingsOpen,
     setViewState,
+    maxHeight, setMaxHeightRaw,
+    modeMaxHeight: modeConf.maxHeight,
     toggleTheme,
     wardLabels, setWardLabels,
     wardGeom, setWardGeom,
