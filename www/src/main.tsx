@@ -5,11 +5,7 @@ import 'use-kbd/styles.css'
 import './index.css'
 import App from './App.tsx'
 import { ThemeProvider } from './ThemeContext'
-import ThemeToggle from './ThemeToggle'
-import MobileSpeedDial from './MobileSpeedDial'
-
-const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
-const isMobile = isTouchDevice || window.innerWidth <= 768
+import SpeedDial from './SpeedDial'
 
 function AppWithModals() {
   const { isModalOpen, closeModal } = useHotkeysContext()
@@ -20,7 +16,7 @@ function AppWithModals() {
       <Omnibar />
       <LookupModal />
       <SequenceModal />
-      {isMobile ? <MobileSpeedDial /> : <ThemeToggle />}
+      <SpeedDial />
     </>
   )
 }
