@@ -355,11 +355,13 @@ function parseHex(hex: string): [number, number, number] {
 export const DEFAULT_STOPS_DARK: ColorStop[] = [
   { value: 0, color: [96, 96, 96] },
   { value: 3.8, color: [255, 0, 0] },
-  { value: 22.4, color: [0, 255, 0] },
+  { value: 9.9, color: [255, 217, 26] },
+  { value: 92.6, color: [0, 255, 0] },
 ]
 
 export const DEFAULT_STOPS_LIGHT: ColorStop[] = [
   { value: 0, color: [255, 255, 255] },
   { value: 3.8, color: [255, 71, 71] },
-  { value: 22.4, color: [0, 214, 0] },
+  { value: 9.9, color: [230, 190, 0] },
+  { value: 92.6, color: [0, 214, 0] },
 ]

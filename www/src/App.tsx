@@ -113,20 +113,20 @@ const MODE_DEFAULTS: Record<string, ModeConfig> = {
   'lot':                    { max: 300,   maxHeight: 4500 },
   'unit':                   { max: 300,   maxHeight: 4500 },
   'census-block:per_sqft':  { max: 20, maxHeight: 2000, stops: {
-    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 1.5, color: [255, 0, 0] }, { value: 12, color: [0, 255, 0] }],
-    light: [{ value: 0, color: [255, 255, 255] }, { value: 1.5, color: [255, 71, 71] }, { value: 12, color: [0, 214, 0] }],
+    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 1.5, color: [255, 0, 0] }, { value: 4, color: [255, 217, 26] }, { value: 12, color: [0, 255, 0] }],
+    light: [{ value: 0, color: [255, 255, 255] }, { value: 1.5, color: [255, 71, 71] }, { value: 4, color: [230, 190, 0] }, { value: 12, color: [0, 214, 0] }],
   }},
   'census-block:per_capita':{ max: 15000, maxHeight: 4500, scale: 'sqrt', stops: {
-    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 3000, color: [255, 0, 0] }, { value: 10000, color: [0, 255, 0] }],
-    light: [{ value: 0, color: [255, 255, 255] }, { value: 3000, color: [255, 71, 71] }, { value: 10000, color: [0, 214, 0] }],
+    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 3000, color: [255, 0, 0] }, { value: 5500, color: [255, 217, 26] }, { value: 10000, color: [0, 255, 0] }],
+    light: [{ value: 0, color: [255, 255, 255] }, { value: 3000, color: [255, 71, 71] }, { value: 5500, color: [230, 190, 0] }, { value: 10000, color: [0, 214, 0] }],
   }},
   'ward:per_sqft':          { max: 10, maxHeight: 5500, scale: 'linear', stops: {
-    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 4.9, color: [255, 0, 0] }, { value: 8.6, color: [0, 255, 0] }],
-    light: [{ value: 0, color: [255, 255, 255] }, { value: 4.9, color: [255, 71, 71] }, { value: 8.6, color: [0, 214, 0] }],
+    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 4.9, color: [255, 0, 0] }, { value: 6.5, color: [255, 217, 26] }, { value: 8.6, color: [0, 255, 0] }],
+    light: [{ value: 0, color: [255, 255, 255] }, { value: 4.9, color: [255, 71, 71] }, { value: 6.5, color: [230, 190, 0] }, { value: 8.6, color: [0, 214, 0] }],
   }},
   'ward:per_capita':        { max: 9000, maxHeight: 5400, scale: 'sqrt', stops: {
-    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 1273.7, color: [255, 0, 0] }, { value: 6834.5, color: [0, 255, 0] }],
-    light: [{ value: 0, color: [255, 255, 255] }, { value: 1273.7, color: [255, 71, 71] }, { value: 6834.5, color: [0, 214, 0] }],
+    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 1273.7, color: [255, 0, 0] }, { value: 3500, color: [255, 217, 26] }, { value: 6834.5, color: [0, 255, 0] }],
+    light: [{ value: 0, color: [255, 255, 255] }, { value: 1273.7, color: [255, 71, 71] }, { value: 3500, color: [230, 190, 0] }, { value: 6834.5, color: [0, 214, 0] }],
   }},
 }
 const SS_PREFIX = 'jc-taxes:'
@@ -149,8 +149,8 @@ const optScaleParam: Param<ScaleType | undefined> = {
 }
 
 const boolParam: Param<boolean> = {
-  decode: (s: string | undefined) => s === '1',
-  encode: (v: boolean) => v ? '1' : undefined as unknown as string,
+  decode: (s: string | undefined) => s !== '0',
+  encode: (v: boolean) => v ? undefined as unknown as string : '0',
 }
 
 const optNumParam: Param<number | undefined> = {
@@ -183,6 +183,7 @@ export default function App() {
   const [metricMode, setMetricModeRaw] = useUrlState('metric', stringParam('per_sqft'))
   const [wardGeom, setWardGeom] = useUrlState('wg', stringParam('merged'))
   const [wardLabels, setWardLabels] = useUrlState('wl', boolParam)
+  const [extruded, setExtruded] = useUrlState('3d', boolParam)
 
   const hasPopulation = aggregateMode === 'census-block' || aggregateMode === 'ward'
   const modeKey = getModeKey(aggregateMode, metricMode)
@@ -192,7 +193,15 @@ export default function App() {
   const maxVal = modeConf.max
   // Effective max height: URL value if explicitly set, else mode default
   const maxHeight = maxHeightRaw ?? modeConf.maxHeight
-  const heightScale = maxHeight / modeConf.max
+  // Height scale: tallest bar = maxHeight. Derived from actual data max.
+  const dataMax = useMemo(() => {
+    if (!data || data.length === 0) return modeConf.max
+    const field = metricMode === 'per_capita' ? 'paid_per_capita' : 'paid_per_sqft'
+    let mx = 0
+    for (const f of data) mx = Math.max(mx, f.properties?.[field] ?? 0)
+    return mx || modeConf.max
+  }, [data, metricMode, modeConf.max])
+  const heightScale = maxHeight / dataMax
   // Freeze height scale while loading to prevent stale data rendered with new-mode elevation
   const stableHeightScaleRef = useRef(heightScale)
   if (!loading) stableHeightScaleRef.current = heightScale
@@ -234,6 +243,7 @@ export default function App() {
   }, [aggregateMode, metricMode, maxHeight, maxHeightRaw, colorScaleRaw, hasCustomStops, resetColorStopsRaw])
 
   const setAggregateMode = useCallback((newAgg: string) => {
+    if (newAgg === aggregateMode) return
     setLoading(true)
     const newMetric = (newAgg === 'census-block' || newAgg === 'ward') ? metricMode : 'per_sqft'
     switchToMode(newAgg, newMetric)
@@ -241,7 +251,7 @@ export default function App() {
     if (!(newAgg === 'census-block' || newAgg === 'ward') && metricMode === 'per_capita') {
       setMetricModeRaw('per_sqft')
     }
-  }, [switchToMode, metricMode])
+  }, [aggregateMode, switchToMode, metricMode])
 
   const setMetricMode = useCallback((newMetric: string) => {
     switchToMode(aggregateMode, newMetric)
@@ -372,7 +382,7 @@ export default function App() {
 
     for (let wi = 0; wi < wardLabelInfo.length; wi++) {
       const { metricVal, rings } = wardLabelInfo[wi]
-      const elev = Math.min(metricVal * heightScale, maxHeight)
+      const elev = metricVal * heightScale
 
       for (const ring of rings) {
         const n = ring.length
@@ -587,10 +597,10 @@ export default function App() {
       id: 'parcels',
       data: effectiveData ?? [],
       filled: true,
-      extruded: true,
-      wireframe: true,
+      extruded,
+      wireframe: extruded,
       getFillColor,
-      getElevation: (f) => Math.min(getMetricValue(f) * stableHeightScaleRef.current, maxHeight),
+      getElevation: extruded ? (f) => getMetricValue(f) * stableHeightScaleRef.current : 0,
       getLineColor: lineColor,
       lineWidthMinPixels: 1,
       pickable: true,
@@ -617,7 +627,7 @@ export default function App() {
       },
       updateTriggers: {
         getFillColor: [year, maxVal, colorStops, colorScale, hoveredId, selectedId, aggregateMode, actualTheme, metricMode, staleData],
-        getElevation: [year, stableHeightScaleRef.current, aggregateMode, metricMode, maxHeight],
+        getElevation: [year, stableHeightScaleRef.current, aggregateMode, metricMode],
         getLineColor: [actualTheme],
       },
     }),
@@ -770,7 +780,15 @@ export default function App() {
                 Ward labels
               </label>
             </>)}
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={extruded}
+                onChange={(e) => setExtruded(e.target.checked)}
+              />
+              3D
+            </label>
+            {extruded && <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               Max height:{' '}
               <input
                 type="number"
@@ -795,7 +813,7 @@ export default function App() {
                   ↺
                 </button>
               )}
-            </label>
+            </label>}
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               Pitch: {Math.round(viewState.pitch)}°
               <input
@@ -822,6 +840,7 @@ export default function App() {
               position: 'absolute',
               top: 10,
               left: 10,
+              zIndex: 1,
               background: 'var(--panel-bg)',
               color: 'var(--text-primary)',
               padding: '10px 15px',
@@ -901,7 +920,6 @@ export default function App() {
               ? '0 0 4px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.6)'
               : '0 0 4px rgba(255,255,255,0.9), 0 0 8px rgba(255,255,255,0.6)',
             pointerEvents: 'none',
-            zIndex: 2,
           }}
         >
           {label.text}

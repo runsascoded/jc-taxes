@@ -17,8 +17,7 @@ import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
  * Classification as "pitch" requires both fingers moving in the same vertical
  * direction with low spread change (not pinch) and low rotation.
  *
- * Convention: drag down = increase pitch (tilt toward horizon), matching
- * deck.gl's own `_onMultiPan` → `rotate` code path.
+ * Convention: drag up = increase pitch (tilt toward horizon / surface).
  *
  * Usage:
  * ```tsx
@@ -108,7 +107,7 @@ export function useTouchPitch<V extends { pitch: number }>({
       e.preventDefault()
       const { maxPitch: mp, sensitivity: s } = cfgRef.current
       const frameDy = ((y0 - g.ly0) + (y1 - g.ly1)) / 2
-      setterRef.current(v => ({ ...v, pitch: Math.max(0, Math.min(mp, v.pitch + frameDy * s)) } as V))
+      setterRef.current(v => ({ ...v, pitch: Math.max(0, Math.min(mp, v.pitch - frameDy * s)) } as V))
       g.ly0 = y0; g.ly1 = y1
     }
 
