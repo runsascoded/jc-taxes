@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Map } from 'react-map-gl/maplibre'
 import DeckGL from '@deck.gl/react'
-import { WebMercatorViewport } from '@deck.gl/core'
+import { WebMercatorViewport, FlyToInterpolator, LinearInterpolator } from '@deck.gl/core'
 import { GeoJsonLayer } from '@deck.gl/layers'
 import { useUrlState, intParam, stringParam } from 'use-prms'
 import type { Param } from 'use-prms'
@@ -287,7 +287,14 @@ export default function App() {
       const lats = coords.map(c => c[1])
       const centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2
       const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2
-      setViewState(v => ({ ...v, longitude: centerLng, latitude: centerLat, zoom: Math.max(v.zoom, 15) }))
+      setViewState(v => ({
+        ...v,
+        longitude: centerLng,
+        latitude: centerLat,
+        zoom: Math.max(v.zoom, 15),
+        transitionDuration: 500,
+        transitionInterpolator: new FlyToInterpolator(),
+      }))
     }
   }, [])
   useParcelSearch({ data, onSelect: onParcelSelect })
@@ -624,8 +631,8 @@ export default function App() {
         viewState={viewState}
         onViewStateChange={({ viewState: vs }) => {
           if (isPitchingRef.current) return
-          const { latitude, longitude, zoom, pitch, bearing } = vs as ViewState
-          setViewState({ latitude, longitude, zoom, pitch, bearing })
+          const { latitude, longitude, zoom, pitch, bearing, transitionDuration, transitionInterpolator } = vs as ViewState
+          setViewState({ latitude, longitude, zoom, pitch, bearing, transitionDuration, transitionInterpolator })
         }}
         onClick={({ object }) => {
           if (!object && !kbdCtx?.isOmnibarOpen) {
@@ -893,6 +900,34 @@ export default function App() {
           {label.text}
         </div>
       ))}
+
+      {/* Compass rose */}
+      <div
+        onClick={() => setViewState(v => ({
+          ...v,
+          bearing: 0,
+          transitionDuration: 300,
+          transitionInterpolator: new LinearInterpolator(['bearing']),
+        }))}
+        style={{
+          position: 'absolute',
+          bottom: 10,
+          right: 10,
+          width: 40,
+          height: 40,
+          cursor: viewState.bearing !== 0 ? 'pointer' : undefined,
+          zIndex: 1,
+          opacity: viewState.bearing === 0 ? 0.3 : 0.85,
+        }}
+        title={viewState.bearing !== 0 ? `Bearing: ${Math.round(viewState.bearing)}° — Click to reset` : 'North up'}
+      >
+        <svg viewBox="0 0 40 40" style={{ transform: `rotate(${-viewState.bearing}deg)` }}>
+          <circle cx="20" cy="20" r="18" fill="var(--panel-bg)" stroke="var(--text-secondary)" strokeWidth="1" opacity="0.6" />
+          <polygon points="20,4 23.5,19 20,16 16.5,19" fill="#e53935" />
+          <polygon points="20,36 23.5,21 20,24 16.5,21" fill="var(--text-secondary)" opacity="0.4" />
+          <text x="20" y="3.5" textAnchor="middle" fontSize="6" fontWeight="bold" fill="#e53935">N</text>
+        </svg>
+      </div>
 
       {/* Status bar */}
       <div

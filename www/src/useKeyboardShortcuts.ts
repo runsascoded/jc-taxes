@@ -1,5 +1,6 @@
 import { useAction } from 'use-kbd'
-import type { Dispatch, SetStateAction } from 'react'
+import { LinearInterpolator } from '@deck.gl/core'
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 
 const AVAILABLE_YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
 
@@ -9,12 +10,29 @@ export type ViewState = {
   zoom: number
   pitch: number
   bearing: number
+  transitionDuration?: number
+  transitionInterpolator?: object
 }
 
 const WARD_GEOMS = ['merged', 'blocks', 'lots', 'boundary'] as const
 
-// Pan increment per step (degrees longitude/latitude at zoom ~12)
-const PAN_STEP = 0.005
+// Zoom-dependent pan step: constant screen distance across zoom levels
+const panStep = (zoom: number) => 0.01 * Math.pow(2, 12 - zoom)
+
+const interpolators: Record<string, LinearInterpolator> = {}
+const transition = (props: string[]) => {
+  const key = props.join(',')
+  interpolators[key] ??= new LinearInterpolator(props)
+  return { transitionDuration: 60, transitionInterpolator: interpolators[key] }
+}
+
+// Continuous movement speeds (for press-and-hold)
+const PAN_SPEED = 16       // pan steps per second
+const ZOOM_SPEED = 2.0     // zoom levels per second
+const ROTATE_SPEED = 60    // degrees per second
+const PITCH_SPEED = 60     // degrees per second
+
+const MOVEMENT_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '-', '=', 'Shift'])
 
 type Props = {
   year: number
@@ -59,6 +77,63 @@ export function useKeyboardShortcuts({
 }: Props) {
   const isWardMode = aggregateMode === 'ward'
   const yearIdx = AVAILABLE_YEARS.indexOf(year)
+
+  // Continuous movement for press-and-hold
+  const activeMovements = useRef(new Set<string>())
+  const rafRef = useRef(0)
+  const lastTimeRef = useRef(0)
+
+  const rafTick = useCallback((time: number) => {
+    if (activeMovements.current.size === 0) {
+      rafRef.current = 0
+      lastTimeRef.current = 0
+      return
+    }
+    const dt = lastTimeRef.current ? Math.min((time - lastTimeRef.current) / 1000, 0.05) : 1 / 60
+    lastTimeRef.current = time
+    if (dt > 0) {
+      setViewState(v => {
+        let { latitude, longitude, zoom, pitch, bearing } = v
+        const p = panStep(zoom) * PAN_SPEED * dt
+        const bearingRad = bearing * Math.PI / 180
+        const cosB = Math.cos(bearingRad)
+        const sinB = Math.sin(bearingRad)
+        if (activeMovements.current.has('pan-left'))  { longitude -= p * cosB; latitude += p * sinB }
+        if (activeMovements.current.has('pan-right')) { longitude += p * cosB; latitude -= p * sinB }
+        if (activeMovements.current.has('pan-up'))    { longitude += p * sinB; latitude += p * cosB }
+        if (activeMovements.current.has('pan-down'))  { longitude -= p * sinB; latitude -= p * cosB }
+        if (activeMovements.current.has('zoom-in')) zoom = Math.min(24, zoom + ZOOM_SPEED * dt)
+        if (activeMovements.current.has('zoom-out')) zoom = Math.max(0, zoom - ZOOM_SPEED * dt)
+        if (activeMovements.current.has('pitch-up')) pitch = Math.min(85, pitch + PITCH_SPEED * dt)
+        if (activeMovements.current.has('pitch-down')) pitch = Math.max(0, pitch - PITCH_SPEED * dt)
+        if (activeMovements.current.has('rotate-cw')) bearing += ROTATE_SPEED * dt
+        if (activeMovements.current.has('rotate-ccw')) bearing -= ROTATE_SPEED * dt
+        return { latitude, longitude, zoom, pitch, bearing }
+      })
+    }
+    rafRef.current = requestAnimationFrame(rafTick)
+  }, [setViewState])
+
+  const startMovement = useCallback((direction: string) => {
+    activeMovements.current.add(direction)
+    if (!rafRef.current) {
+      lastTimeRef.current = 0
+      rafRef.current = requestAnimationFrame(rafTick)
+    }
+  }, [rafTick])
+
+  useEffect(() => {
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (MOVEMENT_KEYS.has(e.key)) {
+        activeMovements.current.clear()
+      }
+    }
+    window.addEventListener('keyup', onKeyUp)
+    return () => {
+      window.removeEventListener('keyup', onKeyUp)
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+    }
+  }, [])
 
   // Year navigation: [ and ] to avoid arrow-key conflict with viewport panning
   useAction('year:prev', {
@@ -120,7 +195,7 @@ export function useKeyboardShortcuts({
     label: 'Flat view (pitch 0)',
     group: 'UI',
     defaultBindings: ['f'],
-    handler: () => setViewState(v => ({ ...v, pitch: 0 })),
+    handler: () => setViewState(v => ({ ...v, pitch: 0, ...transition(['pitch']) })),
   })
 
   useAction('view:census-blocks', {
@@ -149,7 +224,17 @@ export function useKeyboardShortcuts({
     label: '3D view (pitch 45)',
     group: 'UI',
     defaultBindings: ['d'],
-    handler: () => setViewState(v => ({ ...v, pitch: 45 })),
+    handler: () => setViewState(v => ({ ...v, pitch: 45, ...transition(['pitch']) })),
+  })
+
+  useAction('view:bearing', {
+    label: 'Set bearing (degrees)',
+    group: 'Viewport',
+    defaultBindings: ['n', 'n \\f', '\\f n'],
+    handler: (_e, captures) => {
+      const deg = captures?.[0] ?? 0
+      setViewState(v => ({ ...v, bearing: deg, ...transition(['bearing']) }))
+    },
   })
 
   // Pitch: p N or N p → set absolute pitch; shift+up/down to nudge
@@ -159,89 +244,145 @@ export function useKeyboardShortcuts({
     defaultBindings: ['p \\d+', '\\d+ p'],
     handler: (_e, captures) => {
       const deg = Math.min(85, Math.max(0, captures?.[0] ?? 45))
-      setViewState(v => ({ ...v, pitch: deg }))
+      setViewState(v => ({ ...v, pitch: deg, ...transition(['pitch']) }))
     },
   })
 
   useAction('view:pitch-up', {
-    label: 'Increase pitch (degrees)',
+    label: 'Increase pitch',
     group: 'Viewport',
     defaultBindings: ['shift+arrowdown', '\\f shift+arrowdown'],
-    handler: (_e, captures) => {
-      const deg = captures?.[0] ?? 5
-      setViewState(v => ({ ...v, pitch: Math.min(85, v.pitch + deg) }))
+    handler: (e, captures) => {
+      if (e?.repeat) return
+      const deg = captures?.[0]
+      if (deg) {
+        setViewState(v => ({ ...v, pitch: Math.min(85, v.pitch + deg) }))
+      } else {
+        startMovement('pitch-up')
+      }
     },
   })
 
   useAction('view:pitch-down', {
-    label: 'Decrease pitch (degrees)',
+    label: 'Decrease pitch',
     group: 'Viewport',
     defaultBindings: ['shift+arrowup', '\\f shift+arrowup'],
-    handler: (_e, captures) => {
-      const deg = captures?.[0] ?? 5
-      setViewState(v => ({ ...v, pitch: Math.max(0, v.pitch - deg) }))
+    handler: (e, captures) => {
+      if (e?.repeat) return
+      const deg = captures?.[0]
+      if (deg) {
+        setViewState(v => ({ ...v, pitch: Math.max(0, v.pitch - deg) }))
+      } else {
+        startMovement('pitch-down')
+      }
     },
   })
 
-  // Rotate: shift+left/right (plain = 5°, or N shift+arrow for N degrees)
+  // Rotate: shift+left/right
   useAction('view:rotate-cw', {
-    label: 'Rotate CW (degrees)',
+    label: 'Rotate CW',
     group: 'Viewport',
     defaultBindings: ['shift+arrowleft', '\\f shift+arrowleft'],
-    handler: (_e, captures) => {
-      const deg = captures?.[0] ?? 5
-      setViewState(v => ({ ...v, bearing: v.bearing + deg }))
+    handler: (e, captures) => {
+      if (e?.repeat) return
+      const deg = captures?.[0]
+      if (deg) {
+        setViewState(v => ({ ...v, bearing: v.bearing + deg }))
+      } else {
+        startMovement('rotate-cw')
+      }
     },
   })
 
   useAction('view:rotate-ccw', {
-    label: 'Rotate CCW (degrees)',
+    label: 'Rotate CCW',
     group: 'Viewport',
     defaultBindings: ['shift+arrowright', '\\f shift+arrowright'],
-    handler: (_e, captures) => {
-      const deg = captures?.[0] ?? 5
-      setViewState(v => ({ ...v, bearing: v.bearing - deg }))
+    handler: (e, captures) => {
+      if (e?.repeat) return
+      const deg = captures?.[0]
+      if (deg) {
+        setViewState(v => ({ ...v, bearing: v.bearing - deg }))
+      } else {
+        startMovement('rotate-ccw')
+      }
     },
   })
 
-  // Pan: arrow keys (plain or with N-step prefix)
+  // Pan: arrow keys (or N arrow for N discrete steps)
   useAction('view:pan-left', {
-    label: 'Pan left (N steps)',
+    label: 'Pan left',
     group: 'Viewport',
     defaultBindings: ['arrowleft', '\\d+ arrowleft'],
-    handler: (_e, captures) => {
-      const n = captures?.[0] ?? 1
-      setViewState(v => ({ ...v, longitude: v.longitude - PAN_STEP * n }))
+    handler: (e, captures) => {
+      if (e?.repeat) return
+      const n = captures?.[0]
+      if (n) {
+        setViewState(v => {
+          const step = panStep(v.zoom) * n
+          const rad = v.bearing * Math.PI / 180
+          return { ...v, longitude: v.longitude - step * Math.cos(rad), latitude: v.latitude + step * Math.sin(rad) }
+        })
+      } else {
+        startMovement('pan-left')
+      }
     },
   })
 
   useAction('view:pan-right', {
-    label: 'Pan right (N steps)',
+    label: 'Pan right',
     group: 'Viewport',
     defaultBindings: ['arrowright', '\\d+ arrowright'],
-    handler: (_e, captures) => {
-      const n = captures?.[0] ?? 1
-      setViewState(v => ({ ...v, longitude: v.longitude + PAN_STEP * n }))
+    handler: (e, captures) => {
+      if (e?.repeat) return
+      const n = captures?.[0]
+      if (n) {
+        setViewState(v => {
+          const step = panStep(v.zoom) * n
+          const rad = v.bearing * Math.PI / 180
+          return { ...v, longitude: v.longitude + step * Math.cos(rad), latitude: v.latitude - step * Math.sin(rad) }
+        })
+      } else {
+        startMovement('pan-right')
+      }
     },
   })
 
   useAction('view:pan-up', {
-    label: 'Pan up (N steps)',
+    label: 'Pan up',
     group: 'Viewport',
     defaultBindings: ['arrowup', '\\d+ arrowup'],
-    handler: (_e, captures) => {
-      const n = captures?.[0] ?? 1
-      setViewState(v => ({ ...v, latitude: v.latitude + PAN_STEP * n }))
+    handler: (e, captures) => {
+      if (e?.repeat) return
+      const n = captures?.[0]
+      if (n) {
+        setViewState(v => {
+          const step = panStep(v.zoom) * n
+          const rad = v.bearing * Math.PI / 180
+          return { ...v, longitude: v.longitude + step * Math.sin(rad), latitude: v.latitude + step * Math.cos(rad) }
+        })
+      } else {
+        startMovement('pan-up')
+      }
     },
   })
 
   useAction('view:pan-down', {
-    label: 'Pan down (N steps)',
+    label: 'Pan down',
     group: 'Viewport',
     defaultBindings: ['arrowdown', '\\d+ arrowdown'],
-    handler: (_e, captures) => {
-      const n = captures?.[0] ?? 1
-      setViewState(v => ({ ...v, latitude: v.latitude - PAN_STEP * n }))
+    handler: (e, captures) => {
+      if (e?.repeat) return
+      const n = captures?.[0]
+      if (n) {
+        setViewState(v => {
+          const step = panStep(v.zoom) * n
+          const rad = v.bearing * Math.PI / 180
+          return { ...v, longitude: v.longitude - step * Math.sin(rad), latitude: v.latitude - step * Math.cos(rad) }
+        })
+      } else {
+        startMovement('pan-down')
+      }
     },
   })
 
@@ -262,14 +403,20 @@ export function useKeyboardShortcuts({
     label: 'Zoom out',
     group: 'Viewport',
     defaultBindings: ['-'],
-    handler: () => setViewState(v => ({ ...v, zoom: Math.max(0, v.zoom - 0.2) })),
+    handler: (e) => {
+      if (e?.repeat) return
+      startMovement('zoom-out')
+    },
   })
 
   useAction('view:zoom-in', {
     label: 'Zoom in',
     group: 'Viewport',
     defaultBindings: ['='],
-    handler: () => setViewState(v => ({ ...v, zoom: Math.min(24, v.zoom + 0.2) })),
+    handler: (e) => {
+      if (e?.repeat) return
+      startMovement('zoom-in')
+    },
   })
 
   useAction('ward:labels', {
