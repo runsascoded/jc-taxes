@@ -125,8 +125,8 @@ const MODE_DEFAULTS: Record<string, ModeConfig> = {
     light: [{ value: 0, color: [255, 255, 255] }, { value: 4.9, color: [255, 71, 71] }, { value: 8.6, color: [0, 214, 0] }],
   }},
   'ward:per_capita':        { max: 9000, maxHeight: 5400, scale: 'sqrt', stops: {
-    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 2500, color: [255, 0, 0] }, { value: 7000, color: [0, 255, 0] }],
-    light: [{ value: 0, color: [255, 255, 255] }, { value: 2500, color: [255, 71, 71] }, { value: 7000, color: [0, 214, 0] }],
+    dark:  [{ value: 0, color: [96, 96, 96] }, { value: 1273.7, color: [255, 0, 0] }, { value: 6834.5, color: [0, 255, 0] }],
+    light: [{ value: 0, color: [255, 255, 255] }, { value: 1273.7, color: [255, 71, 71] }, { value: 6834.5, color: [0, 214, 0] }],
   }},
 }
 const SS_PREFIX = 'jc-taxes:'
@@ -372,7 +372,7 @@ export default function App() {
 
     for (let wi = 0; wi < wardLabelInfo.length; wi++) {
       const { metricVal, rings } = wardLabelInfo[wi]
-      const elev = metricVal * heightScale
+      const elev = Math.min(metricVal * heightScale, maxHeight)
 
       for (const ring of rings) {
         const n = ring.length
@@ -590,7 +590,7 @@ export default function App() {
       extruded: true,
       wireframe: true,
       getFillColor,
-      getElevation: (f) => getMetricValue(f) * stableHeightScaleRef.current,
+      getElevation: (f) => Math.min(getMetricValue(f) * stableHeightScaleRef.current, maxHeight),
       getLineColor: lineColor,
       lineWidthMinPixels: 1,
       pickable: true,
@@ -617,7 +617,7 @@ export default function App() {
       },
       updateTriggers: {
         getFillColor: [year, maxVal, colorStops, colorScale, hoveredId, selectedId, aggregateMode, actualTheme, metricMode, staleData],
-        getElevation: [year, stableHeightScaleRef.current, aggregateMode, metricMode],
+        getElevation: [year, stableHeightScaleRef.current, aggregateMode, metricMode, maxHeight],
         getLineColor: [actualTheme],
       },
     }),
