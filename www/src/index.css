@@ -48,7 +48,7 @@ html, body, #root {
   --kbd-text: #e0e0e0;
   --kbd-text-secondary: #b0b0b0;
   --kbd-border: #404040;
-  --kbd-accent: #4ecdc4;
+  /*--kbd-accent: #4ecdc4;*/
   --kbd-accent-hover: #4ecdc4;
   --kbd-kbd-bg: #2d2d2d;
   --kbd-kbd-border: #404040;
