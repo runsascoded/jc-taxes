@@ -42,6 +42,6 @@
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4",
     "vite-plugin-dvc": "github:runsascoded/vite-plugin-dvc#57d8f5f71582d4fa42914a569541d82473e8e208",
-    "scrns": "https://gitlab.com/runsascoded/js/scrns/-/archive/52832889daf72b90653dd6546ef0d8981428a281/scrns-52832889daf72b90653dd6546ef0d8981428a281.tar.gz"
+    "scrns": "https://gitlab.com/runsascoded/js/scrns/-/archive/dfa71f06ab91c0f58913a87f395f0480af411c3d/scrns-dfa71f06ab91c0f58913a87f395f0480af411c3d.tar.gz"
   }
 }

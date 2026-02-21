@@ -261,6 +261,13 @@ export default function App() {
   // URL is source of truth for initial load; local state for smooth rendering
   const [urlView, setUrlView] = useUrlState('v', viewParam)
   const [viewState, setViewState] = useState<ViewState>(urlView)
+  // Expose setViewState for external tools (e.g. scrns screencast automation)
+  useEffect(() => {
+    (window as any).__setViewState = (partial: Partial<ViewState>) => {
+      setViewState(v => ({ ...v, ...partial }))
+    }
+    return () => { delete (window as any).__setViewState }
+  }, [])
   // Debounce URL writes whenever viewState changes (from any source).
   // Skip while omnibar is open: the synthetic popstate from replaceState
   // races with use-kbd's history pushState and can close the omnibar.

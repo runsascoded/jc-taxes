@@ -27,10 +27,12 @@ const transition = (props: string[]) => {
 }
 
 // Continuous movement speeds (for press-and-hold)
-const PAN_SPEED = 16       // pan steps per second
-const ZOOM_SPEED = 2.0     // zoom levels per second
-const ROTATE_SPEED = 60    // degrees per second
-const PITCH_SPEED = 60     // degrees per second
+// Override via URL params (e.g. ?panSpeed=8&rotateSpeed=15) for screencasts
+const params = new URLSearchParams(window.location.search)
+const PAN_SPEED = Number(params.get('panSpeed')) || 16
+const ZOOM_SPEED = Number(params.get('zoomSpeed')) || 2.0
+const ROTATE_SPEED = Number(params.get('rotateSpeed')) || 60
+const PITCH_SPEED = Number(params.get('pitchSpeed')) || 60
 
 const MOVEMENT_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '-', '=', 'Shift'])
 
