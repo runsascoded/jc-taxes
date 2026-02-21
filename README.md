@@ -64,7 +64,7 @@ cd www && pnpm install
 
 ---
 
-<a href="https://jct.rbw.sh/">
-  <video src="https://github.com/user-attachments/assets/16ee2158-be12-4e8d-82b4-5b21ff8682c7" autoplay loop muted playsinline></video>
-</a>
+https://github.com/user-attachments/assets/16ee2158-be12-4e8d-82b4-5b21ff8682c7
+
+**[Try it live →][jct.rbw.sh]**
 
