@@ -10,7 +10,9 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "screenshot": "scrns"
+    "screenshot": "scrns",
+    "test": "playwright test",
+    "test:ui": "playwright test --ui"
   },
   "dependencies": {
     "@deck.gl/core": "^9.2.6",
@@ -25,11 +27,12 @@
     "react-dom": "^19.2.0",
     "react-icons": "^5.5.0",
     "react-map-gl": "^8.1.0",
-    "use-kbd": "https://github.com/runsascoded/use-kbd#a1cf5d11b6f1bd1b9ef7fdb15066c4c4139ca2ce",
+    "use-kbd": "^0.10.0",
     "use-prms": "^0.4.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.58.2",
     "@types/node": "^25.2.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
@@ -38,10 +41,10 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "scrns": "https://gitlab.com/runsascoded/js/scrns/-/archive/aceac83017e6a69017beb96caae1d25d66e17fd6/scrns-aceac83017e6a69017beb96caae1d25d66e17fd6.tar.gz",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
     "vite": "^7.2.4",
-    "vite-plugin-dvc": "github:runsascoded/vite-plugin-dvc#57d8f5f71582d4fa42914a569541d82473e8e208",
-    "scrns": "https://gitlab.com/runsascoded/js/scrns/-/archive/aceac83017e6a69017beb96caae1d25d66e17fd6/scrns-aceac83017e6a69017beb96caae1d25d66e17fd6.tar.gz"
+    "vite-plugin-dvc": "github:runsascoded/vite-plugin-dvc#57d8f5f71582d4fa42914a569541d82473e8e208"
   }
 }

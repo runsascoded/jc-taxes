@@ -52,6 +52,14 @@ jobs:
         working-directory: ./www
         run: pnpm run build
 
+      - name: Install Playwright
+        working-directory: ./www
+        run: npx playwright install --with-deps chromium
+
+      - name: Test
+        working-directory: ./www
+        run: pnpm test
+
       - name: Setup Pages
         if: github.ref == 'refs/heads/main'
         uses: actions/configure-pages@v5
