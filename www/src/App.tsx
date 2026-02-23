@@ -650,7 +650,7 @@ export default function App() {
   }
 
   return (
-    <div style={{ width: '100vw', height: '100vh', WebkitTouchCallout: 'none' }} onContextMenu={e => e.preventDefault()}>
+    <div style={{ width: '100vw', height: '100vh', WebkitTouchCallout: 'none' }} onContextMenu={e => e.preventDefault()} {...(!loading && { 'data-loaded': '' })}>
       <DeckGL
         viewState={viewState}
         onViewStateChange={({ viewState: vs }) => {

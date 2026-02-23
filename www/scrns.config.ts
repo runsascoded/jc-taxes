@@ -5,7 +5,7 @@ const wardView = '?v=40.7310-74.0471+11.8+57-2'
 export default {
   host: 3201,
   output: 'public',
-  selector: '#root',
+  selector: '[data-loaded]',
   screenshots: {
     'og-lot': {
       query: `${defaultView}&agg=lot&sel=14507-1`,
