@@ -6,11 +6,11 @@ import './index.css'
 import App from './App.tsx'
 import { ThemeProvider, useTheme } from './ThemeContext'
 import { FaGithub } from 'react-icons/fa'
-import { MdDarkMode, MdLightMode, MdKeyboard } from 'react-icons/md'
+import { MdDarkMode, MdLightMode, MdKeyboard, MdSettingsBrightness } from 'react-icons/md'
 
 function AppWithModals() {
   const { isModalOpen, closeModal, openModal } = useHotkeysContext()
-  const { actualTheme, toggleTheme } = useTheme()
+  const { themeMode, actualTheme, toggleTheme } = useTheme()
   return (
     <>
       <App />
@@ -29,15 +29,15 @@ function AppWithModals() {
           },
           {
             key: 'theme',
-            label: `Theme: ${actualTheme}`,
-            icon: actualTheme === 'dark' ? <MdDarkMode /> : <MdLightMode />,
+            label: `Theme: ${themeMode}`,
+            icon: themeMode === 'dark' ? <MdDarkMode /> : themeMode === 'light' ? <MdLightMode /> : <MdSettingsBrightness />,
             onClick: toggleTheme,
           },
           {
             key: 'github',
             label: 'View on GitHub',
             icon: <FaGithub />,
-            href: 'https://github.com/runsascoded/jc-taxes',
+            href: 'https://github.com/HackJerseyCity/jc-taxes',
           },
         ]}
       />
