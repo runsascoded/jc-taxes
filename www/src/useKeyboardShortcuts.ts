@@ -138,45 +138,43 @@ export function useKeyboardShortcuts({
   }, [])
 
   // Year navigation: [ and ] to avoid arrow-key conflict with viewport panning
-  useAction('year:prev', {
-    label: 'Previous year',
+  useAction('year-a', {
+    label: 'Previous / Next year a',
     group: 'Navigation',
     defaultBindings: ['['],
     enabled: yearIdx > 0,
-    handler: () => {
-      if (yearIdx > 0) setYear(AVAILABLE_YEARS[yearIdx - 1])
-    },
+    handler: () => { if (yearIdx > 0) setYear(AVAILABLE_YEARS[yearIdx - 1]) },
+    actionPair: { pairId: 'year', index: 0 },
   })
-
-  useAction('year:next', {
-    label: 'Next year',
+  useAction('year-b', {
+    label: 'Previous / Next year b',
     group: 'Navigation',
     defaultBindings: [']'],
     enabled: yearIdx < AVAILABLE_YEARS.length - 1,
-    handler: () => {
-      if (yearIdx < AVAILABLE_YEARS.length - 1) setYear(AVAILABLE_YEARS[yearIdx + 1])
-    },
+    handler: () => { if (yearIdx < AVAILABLE_YEARS.length - 1) setYear(AVAILABLE_YEARS[yearIdx + 1]) },
+    actionPair: { pairId: 'year', index: 1 },
   })
 
-  useAction('view:blocks', {
-    label: 'Block view',
+  useAction('view:agg-a', {
+    label: 'Block / Lot / Unit view a',
     group: 'Navigation',
     defaultBindings: ['b'],
     handler: () => setAggregateMode('block'),
+    actionTriplet: { tripletId: 'view:agg', index: 0 },
   })
-
-  useAction('view:lots', {
-    label: 'Lot view',
+  useAction('view:agg-b', {
+    label: 'Block / Lot / Unit view b',
     group: 'Navigation',
     defaultBindings: ['l'],
     handler: () => setAggregateMode('lot'),
+    actionTriplet: { tripletId: 'view:agg', index: 1 },
   })
-
-  useAction('view:units', {
-    label: 'Unit view',
+  useAction('view:agg-c', {
+    label: 'Block / Lot / Unit view c',
     group: 'Navigation',
     defaultBindings: ['u'],
     handler: () => setAggregateMode('unit'),
+    actionTriplet: { tripletId: 'view:agg', index: 2 },
   })
 
   useAction('theme:toggle', {
@@ -250,8 +248,8 @@ export function useKeyboardShortcuts({
     },
   })
 
-  useAction('view:pitch-up', {
-    label: 'Increase pitch',
+  useAction('view:pitch-nudge-a', {
+    label: 'Increase / Decrease pitch a',
     group: 'Viewport',
     defaultBindings: ['shift+arrowdown', '\\f shift+arrowdown'],
     handler: (e, captures) => {
@@ -263,10 +261,10 @@ export function useKeyboardShortcuts({
         startMovement('pitch-up')
       }
     },
+    actionPair: { pairId: 'view:pitch-nudge', index: 0 },
   })
-
-  useAction('view:pitch-down', {
-    label: 'Decrease pitch',
+  useAction('view:pitch-nudge-b', {
+    label: 'Increase / Decrease pitch b',
     group: 'Viewport',
     defaultBindings: ['shift+arrowup', '\\f shift+arrowup'],
     handler: (e, captures) => {
@@ -278,11 +276,12 @@ export function useKeyboardShortcuts({
         startMovement('pitch-down')
       }
     },
+    actionPair: { pairId: 'view:pitch-nudge', index: 1 },
   })
 
   // Rotate: shift+left/right
-  useAction('view:rotate-cw', {
-    label: 'Rotate CW',
+  useAction('view:rotate-a', {
+    label: 'Rotate CW / CCW a',
     group: 'Viewport',
     defaultBindings: ['shift+arrowleft', '\\f shift+arrowleft'],
     handler: (e, captures) => {
@@ -294,10 +293,10 @@ export function useKeyboardShortcuts({
         startMovement('rotate-cw')
       }
     },
+    actionPair: { pairId: 'view:rotate', index: 0 },
   })
-
-  useAction('view:rotate-ccw', {
-    label: 'Rotate CCW',
+  useAction('view:rotate-b', {
+    label: 'Rotate CW / CCW b',
     group: 'Viewport',
     defaultBindings: ['shift+arrowright', '\\f shift+arrowright'],
     handler: (e, captures) => {
@@ -309,11 +308,12 @@ export function useKeyboardShortcuts({
         startMovement('rotate-ccw')
       }
     },
+    actionPair: { pairId: 'view:rotate', index: 1 },
   })
 
   // Pan: arrow keys (or N arrow for N discrete steps)
-  useAction('view:pan-left', {
-    label: 'Pan left',
+  useAction('view:pan-h-a', {
+    label: 'Pan left / right a',
     group: 'Viewport',
     defaultBindings: ['arrowleft', '\\d+ arrowleft'],
     handler: (e, captures) => {
@@ -329,10 +329,10 @@ export function useKeyboardShortcuts({
         startMovement('pan-left')
       }
     },
+    actionPair: { pairId: 'view:pan-h', index: 0 },
   })
-
-  useAction('view:pan-right', {
-    label: 'Pan right',
+  useAction('view:pan-h-b', {
+    label: 'Pan left / right b',
     group: 'Viewport',
     defaultBindings: ['arrowright', '\\d+ arrowright'],
     handler: (e, captures) => {
@@ -348,10 +348,11 @@ export function useKeyboardShortcuts({
         startMovement('pan-right')
       }
     },
+    actionPair: { pairId: 'view:pan-h', index: 1 },
   })
 
-  useAction('view:pan-up', {
-    label: 'Pan up',
+  useAction('view:pan-v-a', {
+    label: 'Pan up / down a',
     group: 'Viewport',
     defaultBindings: ['arrowup', '\\d+ arrowup'],
     handler: (e, captures) => {
@@ -367,10 +368,10 @@ export function useKeyboardShortcuts({
         startMovement('pan-up')
       }
     },
+    actionPair: { pairId: 'view:pan-v', index: 0 },
   })
-
-  useAction('view:pan-down', {
-    label: 'Pan down',
+  useAction('view:pan-v-b', {
+    label: 'Pan up / down b',
     group: 'Viewport',
     defaultBindings: ['arrowdown', '\\d+ arrowdown'],
     handler: (e, captures) => {
@@ -386,6 +387,7 @@ export function useKeyboardShortcuts({
         startMovement('pan-down')
       }
     },
+    actionPair: { pairId: 'view:pan-v', index: 1 },
   })
 
   // Height: h N or N h → set max height to N km (converted to meters)
@@ -400,25 +402,26 @@ export function useKeyboardShortcuts({
     },
   })
 
-  // Zoom: - to zoom out, = to zoom in
-  useAction('view:zoom-out', {
-    label: 'Zoom out',
-    group: 'Viewport',
-    defaultBindings: ['-'],
-    handler: (e) => {
-      if (e?.repeat) return
-      startMovement('zoom-out')
-    },
-  })
-
-  useAction('view:zoom-in', {
-    label: 'Zoom in',
+  // Zoom: = to zoom in, - to zoom out
+  useAction('view:zoom-a', {
+    label: 'Zoom in / out a',
     group: 'Viewport',
     defaultBindings: ['='],
     handler: (e) => {
       if (e?.repeat) return
       startMovement('zoom-in')
     },
+    actionPair: { pairId: 'view:zoom', index: 0 },
+  })
+  useAction('view:zoom-b', {
+    label: 'Zoom in / out b',
+    group: 'Viewport',
+    defaultBindings: ['-'],
+    handler: (e) => {
+      if (e?.repeat) return
+      startMovement('zoom-out')
+    },
+    actionPair: { pairId: 'view:zoom', index: 1 },
   })
 
   useAction('ward:labels', {
