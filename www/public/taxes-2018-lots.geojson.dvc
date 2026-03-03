@@ -1,6 +1,6 @@
 outs:
-- md5: a433cf78818174449f3a96f6a8b1ca85
-  size: 19973087
+- md5: 378efacafda0798c110c3dd4170b401e
+  size: 22817997
   hash: md5
   path: taxes-2018-lots.geojson
 meta:

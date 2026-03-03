@@ -17,6 +17,11 @@ export type ParcelProperties = {
   council_person?: string
   population?: number
   paid_per_capita?: number
+  stories?: number
+  units?: number
+  yr_built?: number
+  bldg_sqft?: number
+  bldg_desc?: string
   lots?: Geometry      // tax-lot fragments geometry (ward geometry toggle)
   blocks?: Geometry    // tax-block outlines geometry (ward geometry toggle)
   boundary?: Geometry  // original ward boundary geometry (ward geometry toggle)

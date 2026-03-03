@@ -13,6 +13,7 @@ import shapely.ops
 from pyproj import Transformer
 from utz import err
 
+from .building_desc import parse_building_desc
 from .census import load_jc_census_blocks, load_jc_wards
 from .paths import CACHE, DATA, PARCELS, PARCELS_COMBINED
 
@@ -86,6 +87,66 @@ def load_addresses(cache_dir: Path = CACHE) -> dict[str, str]:
         except Exception:
             continue
     return addresses
+
+
+def load_building_info(data_dir: Path = DATA) -> dict[str, dict]:
+    """Load building info from taxrecords_enriched.parquet.
+
+    Returns dict mapping "block-lot" → {stories, units, yr_built, bldg_sqft, bldg_desc}.
+    For lots with multiple records (condos), takes the base record (no qualifier)
+    or the first record with building info.
+    """
+    path = data_dir / "taxrecords_enriched.parquet"
+    if not path.exists():
+        err(f"Warning: {path} not found, skipping building info")
+        return {}
+
+    df = pd.read_parquet(path, columns=[
+        "Block", "Lot", "Qual", "Building Desc", "Sq. Ft.", "Yr. Built",
+    ])
+    info: dict[str, dict] = {}
+    for _, row in df.iterrows():
+        block = str(row["Block"]).strip()
+        lot = str(row["Lot"]).strip()
+        qual = str(row.get("Qual", "")).strip() if pd.notna(row.get("Qual")) else ""
+        key = f"{block}-{lot}"
+
+        # Prefer base record (no qualifier); skip if we already have one
+        if key in info and qual:
+            continue
+
+        bldg_desc = row["Building Desc"] if pd.notna(row["Building Desc"]) else None
+        parsed = parse_building_desc(bldg_desc)
+
+        yr_str = row["Yr. Built"] if pd.notna(row["Yr. Built"]) else None
+        yr_built = None
+        if yr_str:
+            try:
+                yr_val = int(float(str(yr_str)))
+                if yr_val >= 1700:
+                    yr_built = yr_val
+            except (ValueError, TypeError):
+                pass
+
+        sqft = row["Sq. Ft."] if pd.notna(row["Sq. Ft."]) else None
+        bldg_sqft = int(sqft) if sqft and sqft > 0 else None
+
+        entry = {}
+        if parsed["stories"] is not None:
+            entry["stories"] = parsed["stories"]
+        if parsed["units"] is not None:
+            entry["units"] = parsed["units"]
+        if yr_built:
+            entry["yr_built"] = yr_built
+        if bldg_sqft:
+            entry["bldg_sqft"] = bldg_sqft
+        if bldg_desc:
+            entry["bldg_desc"] = bldg_desc
+
+        if entry:
+            info[key] = entry
+
+    return info
 
 
 def normalize_street(s: str) -> str:
@@ -194,6 +255,11 @@ def generate_yearly_geojson(
     addresses = load_addresses()
     lot_owners, unit_owners = load_owners()
     err(f"  {len(addresses):,} addresses, {len(lot_owners):,} lot owners, {len(unit_owners):,} unit owners loaded")
+
+    # Load building info from enriched tax records
+    err("Loading building info from enriched tax records...")
+    building_info = load_building_info()
+    err(f"  {len(building_info):,} lots with building info")
 
     # Build block-level street summaries
     block_streets = summarize_block_streets(addresses)
@@ -348,6 +414,9 @@ def generate_yearly_geojson(
                 properties["addr"] = addr
             if owner:
                 properties["owner"] = owner
+            bldg = building_info.get(addr_key)
+            if bldg:
+                properties.update(bldg)
             features.append({"type": "Feature", "geometry": geometry, "properties": properties})
     else:
         # Lot-level or block-level: dissolve geometries
@@ -409,6 +478,9 @@ def generate_yearly_geojson(
                 owner = lot_owners.get(key)
                 if owner:
                     properties["owner"] = owner
+                bldg = building_info.get(key)
+                if bldg:
+                    properties.update(bldg)
             if aggregate == "block":
                 streets = block_streets.get(block_num)
                 if streets:

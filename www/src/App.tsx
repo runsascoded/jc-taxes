@@ -18,6 +18,7 @@ import GradientEditor, {
   interpolateColor,
 } from './GradientEditor'
 import type { ParcelProperties, ParcelFeature } from './types'
+import { getLotNote } from './notes'
 
 // Responsive default views: interpolated by viewport width
 const VIEW_BREAKPOINTS: { width: number, view: ViewState }[] = [
@@ -841,6 +842,18 @@ export default function App() {
         const info = hovered ?? selected!
         const isCensus = !!info.geoid || (!!info.ward && !info.block)
         const sqftActive = metricMode === 'per_sqft'
+        const hasBuilding = !!(info.stories || info.units || info.yr_built || info.bldg_sqft)
+        // Compute centroid for map links
+        const activeId = hovered ? hoveredId : selectedId
+        const feature = activeId && data ? data.find(f => getFeatureId(f) === activeId) : null
+        let centroid: [number, number] | null = null
+        if (feature?.geometry) {
+          const coords = feature.geometry.type === 'Polygon' ? feature.geometry.coordinates[0] : feature.geometry.coordinates[0][0]
+          const lngs = coords.map(c => c[0])
+          const lats = coords.map(c => c[1])
+          centroid = [(Math.min(...lats) + Math.max(...lats)) / 2, (Math.min(...lngs) + Math.max(...lngs)) / 2]
+        }
+        const linkStyle = { color: 'var(--text-secondary)', fontSize: 12, textDecoration: 'none' }
         return (
           <div
             style={{
@@ -877,6 +890,24 @@ export default function App() {
                 {info.owner && <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{info.owner}</div>}
               </>
             )}
+            {hasBuilding && (
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+                {[
+                  info.stories && `${info.stories % 1 ? info.stories : Math.round(info.stories)} stories`,
+                  info.units && `${info.units} unit${info.units > 1 ? 's' : ''}`,
+                  info.yr_built && `built ${info.yr_built}`,
+                  info.bldg_sqft && `${info.bldg_sqft.toLocaleString()} sqft (bldg)`,
+                ].filter(Boolean).join(' · ')}
+              </div>
+            )}
+            {(() => {
+              const note = getLotNote(info.block, info.lot)
+              return note ? (
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, padding: '3px 6px', background: 'var(--input-bg)', borderRadius: 3, lineHeight: 1.3 }}>
+                  {note}
+                </div>
+              ) : null
+            })()}
             {info.area_sqft !== undefined && info.area_sqft > 0 && (
               <div>Area: {info.area_sqft.toLocaleString()} sqft</div>
             )}
@@ -891,6 +922,24 @@ export default function App() {
             {info.paid_per_capita !== undefined && info.paid_per_capita > 0 && (
               <div style={{ color: !sqftActive ? 'var(--text-accent)' : undefined }}>
                 ${info.paid_per_capita.toLocaleString()}/capita
+              </div>
+            )}
+            {centroid && (
+              <div style={{ marginTop: 4, display: 'flex', gap: 8 }}>
+                <a
+                  href={`https://www.google.com/maps/@${centroid[0]},${centroid[1]},19z`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={linkStyle}
+                  title="Google Maps"
+                >Maps</a>
+                <a
+                  href={`https://earth.google.com/web/@${centroid[0]},${centroid[1]},0a,200d,35y,0h,45t`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={linkStyle}
+                  title="Google Earth"
+                >Earth</a>
               </div>
             )}
           </div>
