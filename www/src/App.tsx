@@ -21,6 +21,7 @@ import GradientEditor, {
 } from './GradientEditor'
 import type { ParcelProperties, ParcelFeature } from './types'
 import { getLotNote } from './notes'
+import DistributionChart from './DistributionChart'
 
 // Responsive default views: interpolated by viewport width
 const VIEW_BREAKPOINTS: { width: number, view: ViewState }[] = [
@@ -197,6 +198,7 @@ export default function App() {
   const [wardLabels, setWardLabels] = useUrlState('wl', boolParam)
   const [extruded, setExtruded] = useUrlState('3d', boolParam)
   const [colorBy, setColorBy] = useUrlState('cb', stringParam('metric'))
+  const [percentileRaw, setPercentileRaw] = useUrlState('pct', optNumParam)
 
   const hasPopulation = aggregateMode === 'census-block' || aggregateMode === 'ward'
   const modeKey = getModeKey(aggregateMode, metricMode)
@@ -206,14 +208,30 @@ export default function App() {
   const maxVal = modeConf.max
   // Effective max height: URL value if explicitly set, else mode default
   const maxHeight = maxHeightRaw ?? modeConf.maxHeight
-  // Height scale: tallest bar = maxHeight. Derived from actual data max.
-  const dataMax = useMemo(() => {
-    if (!data || data.length === 0) return modeConf.max
+  const percentile = percentileRaw
+  const metricLabel = metricMode === 'per_capita' ? '/capita' : '/sqft'
+  const sortedVals = useMemo(() => {
+    if (!data || data.length === 0) return []
     const field = metricMode === 'per_capita' ? 'paid_per_capita' : 'paid_per_sqft'
-    let mx = 0
-    for (const f of data) mx = Math.max(mx, f.properties?.[field] ?? 0)
-    return mx || modeConf.max
-  }, [data, metricMode, modeConf.max])
+    const vals: number[] = []
+    for (const f of data) {
+      const v = f.properties?.[field] ?? 0
+      if (v > 0) vals.push(v)
+    }
+    vals.sort((a, b) => a - b)
+    return vals
+  }, [data, metricMode])
+  const dataMax = useMemo(() => {
+    if (sortedVals.length === 0) return modeConf.max
+    if (percentile != null) {
+      return sortedVals[Math.floor(sortedVals.length * percentile / 100)] || modeConf.max
+    }
+    return sortedVals[sortedVals.length - 1] || modeConf.max
+  }, [sortedVals, modeConf.max, percentile])
+  const percentilePrice = useMemo(() => {
+    if (percentile == null || sortedVals.length === 0) return null
+    return sortedVals[Math.floor(sortedVals.length * percentile / 100)]
+  }, [percentile, sortedVals])
   const heightScale = maxHeight / dataMax
   // Freeze height scale while loading to prevent stale data rendered with new-mode elevation
   const stableHeightScaleRef = useRef(heightScale)
@@ -262,6 +280,7 @@ export default function App() {
     // Save current customizations to SS (only if user changed from default)
     if (maxHeightRaw != null) ssSave(oldKey, 'mh', String(maxHeight))
     if (colorScaleRaw != null) ssSave(oldKey, 'scale', colorScaleRaw)
+    if (percentileRaw != null) ssSave(oldKey, 'pct', String(percentileRaw))
 
     // Reset metric to per_sqft for non-census modes
     const effectiveMetric = (newAgg === 'census-block' || newAgg === 'ward') ? newMetric : 'per_sqft'
@@ -272,10 +291,12 @@ export default function App() {
     setMaxHeightRaw(savedMh ? Number(savedMh) : undefined)
     const savedScale = ssLoad(newKey, 'scale')
     setColorScaleRaw((savedScale as ScaleType) ?? undefined)
+    const savedPct = ssLoad(newKey, 'pct')
+    setPercentileRaw(savedPct ? Number(savedPct) : (newAgg === 'unit' ? 99 : undefined))
 
     // Clear custom color stops; mode stops or theme defaults will apply
     if (hasCustomStops) resetColorStopsRaw()
-  }, [aggregateMode, metricMode, maxHeight, maxHeightRaw, colorScaleRaw, hasCustomStops, resetColorStopsRaw])
+  }, [aggregateMode, metricMode, maxHeight, maxHeightRaw, colorScaleRaw, percentileRaw, hasCustomStops, resetColorStopsRaw])
 
   const setAggregateMode = useCallback((newAgg: string) => {
     if (newAgg === aggregateMode) return
@@ -375,6 +396,13 @@ export default function App() {
         setLoading(false)
       })
   }, [year, aggregateMode])
+
+  // Default unit mode to p99 on initial load
+  useEffect(() => {
+    if (aggregateMode === 'unit' && percentileRaw == null) {
+      setPercentileRaw(99)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // For ward mode: swap geometry based on wardGeom setting
   const effectiveData = useMemo(() => {
@@ -651,7 +679,10 @@ export default function App() {
       extruded,
       wireframe: extruded,
       getFillColor,
-      getElevation: extruded ? (f) => getMetricValue(f) * stableHeightScaleRef.current : 0,
+      getElevation: extruded ? (f) => {
+        const h = getMetricValue(f) * stableHeightScaleRef.current
+        return percentile != null ? Math.min(h, maxHeight) : h
+      } : 0,
       getLineColor: lineColor,
       lineWidthMinPixels: 1,
       pickable: true,
@@ -678,7 +709,7 @@ export default function App() {
       },
       updateTriggers: {
         getFillColor: [year, maxVal, colorStops, colorScale, hoveredId, selectedId, aggregateMode, actualTheme, metricMode, staleData, colorBy, colorMin, colorMax],
-        getElevation: [year, stableHeightScaleRef.current, aggregateMode, metricMode],
+        getElevation: [year, stableHeightScaleRef.current, aggregateMode, metricMode, percentile],
         getLineColor: [actualTheme],
       },
     }),
@@ -782,6 +813,18 @@ export default function App() {
                 onReset={hasCustomStops ? resetColorStops : undefined}
                 metricLabel={colorByYrBuilt ? '' : (metricMode === 'per_capita' ? '/capita' : '/sqft')}
               />
+              <details style={{ marginTop: 4 }}>
+                <summary style={{ fontSize: 12, color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                  Distribution
+                </summary>
+                <DistributionChart
+                  values={sortedVals}
+                  percentile={percentile}
+                  max={dataMax}
+                  prefix={colorByYrBuilt ? '' : '$'}
+                  metricLabel={colorByYrBuilt ? '' : metricLabel}
+                />
+              </details>
             </div>
             <label>
               View:{' '}
@@ -877,6 +920,35 @@ export default function App() {
                 </button>
               )}
             </label>}
+            {extruded && <>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  type="checkbox"
+                  checked={percentile != null}
+                  onChange={(e) => setPercentileRaw(e.target.checked ? 99 : undefined)}
+                />
+                Height clamp
+              </label>
+              {percentile != null && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                  <input
+                    type="number"
+                    value={percentile}
+                    min={50}
+                    max={100}
+                    step={1}
+                    onChange={(e) => setPercentileRaw(Number(e.target.value))}
+                    style={{ ...inputStyle, width: 50 }}
+                  />
+                  <span>th percentile</span>
+                  {percentilePrice != null && (
+                    <span style={{ color: 'var(--text-secondary)' }}>
+                      = ${percentilePrice.toFixed(2)}{metricLabel}
+                    </span>
+                  )}
+                </div>
+              )}
+            </>}
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               Pitch: {Math.round(viewState.pitch)}°
               <input
