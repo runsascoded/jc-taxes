@@ -6,7 +6,14 @@ Interactive 3D choropleth of Jersey City property tax payments, from 2018 to 202
 
 | | |
 |---|---|
-| ![From the west](www/public/og-west.gif) | ![Wards](www/public/og-ward.png) |
+| [![Wards](www/public/og-ward.png)](www/public/og-ward.png) | [![Units](www/public/og-unit.png)](www/public/og-unit.png) |
+| [![From the west](www/public/og-west-lot.png)](www/public/og-west-lot.png) | [![Lots](www/public/og-lot.png)](www/public/og-lot.png) |
+
+All view state is URL-encoded via [use-prms] (`v`iew, `agg`regation, `sel`ection, `mh` max height, `pct` percentile, `sp` settings position, ...):
+- [**Lots**][lot-view] — [`?agg=lot&sel=14507-1`][lot-view]
+- [**Wards**][ward-view] — [`?agg=ward&sel=ward-E&wg=blocks`][ward-view]
+- [**Units**][unit-view] — [`?agg=unit&mh=1100&pct=99&sp=br`][unit-view]
+- [**From the west**][west-view] — [`?v=…+106&agg=lot`][west-view]
 
 ## What it shows
 
@@ -58,6 +65,11 @@ cd www && pnpm install
 - [www/README.md](www/README.md) — web app docs
 
 [jct.rbw.sh]: https://jct.rbw.sh/
+[lot-view]: https://jct.rbw.sh/?v=40.7309-74.0630+12.3+52-28&agg=lot&sel=14507-1
+[ward-view]: https://jct.rbw.sh/?v=40.7085-74.0300+11.8+54+100&agg=ward&sel=ward-E&wg=blocks
+[unit-view]: https://jct.rbw.sh/?v=40.7188-74.0563+13.6+66-34&agg=unit&mh=1100&pct=99&sp=br
+[west-view]: https://jct.rbw.sh/?v=40.7192-74.0411+12.5+57+106&agg=lot&sel=14507-1
+[use-prms]: https://github.com/runsascoded/use-prms
 [HLS]: https://apps.hlssystems.com/JerseyCity/PropertyTaxInquiry
 [NJGIN]: https://njgin.nj.gov/
 [JC Open Data]: https://data.jerseycitynj.gov/
