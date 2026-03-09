@@ -1,6 +1,6 @@
 const defaultView = '?v=40.7309-74.0630+12.3+52-28'
 const westView = '?v=40.7192-74.0411+12.5+57+106'
-const wardView = '?v=40.7310-74.0471+11.8+57-2'
+const wardView = '?v=40.7085-74.0300+11.8+54+100'
 const unitView = '?v=40.7188-74.0563+13.6+66-34&agg=unit&mh=1100&pct=99&sp=br&so=0&sel=11604-1'
 
 export default {
